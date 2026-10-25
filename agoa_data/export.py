@@ -46,6 +46,7 @@ def synthese_texte(res):
     L = [f"AGOA DATA — volumétrie par nuage de points LiDAR HD", "",
          f"Adresse    : {a['label']}",
          f"Parcelle   : {p['section']} {p['numero']} (IDU {p['idu']}), {p['contenance']:.0f} m² au cadastre",
+         f"Plan cadastral : {res['cadastre_pdf']}" if res.get("cadastre_pdf") else "Plan cadastral : non produit",
          f"Dalles IGN : {', '.join(res['dalles'])}",
          f"Calcul     : {res['date']}", ""]
     for i, b in enumerate(res["batiments"], 1):

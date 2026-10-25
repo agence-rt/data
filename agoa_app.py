@@ -3,7 +3,7 @@
 Application Windows de la gamme AGOA (Python 3.10+, tkinter). Saisir une adresse : l'application
 trouve la parcelle, les bâtiments et les voies, télécharge le morceau utile du nuage de points,
 calcule la volumétrie et trace les coupes (une perpendiculaire à chaque voie), puis range les
-livrables dans un dossier (nuage .laz, modèle de toiture .asc, coupes .png, synthèse .txt).
+livrables dans un dossier (nuage .laz, modèle de toiture .asc, coupes .png, plan cadastral .pdf, synthèse .txt).
 """
 import json
 import os
@@ -15,7 +15,7 @@ import tkinter as tk
 import traceback
 from tkinter import filedialog, messagebox, ttk
 
-from agoa_data import APP_NAME, APP_VERSION, pipeline     # APP_VERSION : à augmenter à chaque publication (cf. README)
+from agoa_data import APP_NAME, APP_VERSION, geo, pipeline     # APP_VERSION : à augmenter à chaque publication (cf. README)
 from agoa_data.geo import DataError
 
 # Charte graphique commune à la gamme AGOA
@@ -102,6 +102,8 @@ class App(tk.Tk):
         self.q = queue.Queue()
         self.res = None
         self.images = []
+        self.suggestions, self.choisie = [], None
+        self._timer, self._seq, self._silence = None, 0, False
         self._build()
         self.after(100, self._poll)
 
@@ -121,7 +123,12 @@ class App(tk.Tk):
         self.adr = tk.StringVar(value=self.settings.get("derniere_adresse", ""))
         e = tk.Entry(form, textvariable=self.adr, font=(FONT, 12), relief="solid", bd=1, bg=FIELD)
         e.grid(row=1, column=0, sticky="ew", ipady=5, padx=(0, 10))
-        e.bind("<Return>", lambda ev: self.lancer())
+        self.entry_adr = e
+        e.bind("<Return>", self._entree)
+        e.bind("<Down>", lambda ev: self._deplace(1))
+        e.bind("<Up>", lambda ev: self._deplace(-1))
+        e.bind("<Escape>", lambda ev: self._cache())
+        e.bind("<FocusOut>", lambda ev: self.after(200, self._cache))
         e.focus_set()
         tk.Label(form, text="DOSSIER", font=(FONT, 8, "bold"), bg=BG, fg=MUTED).grid(row=0, column=1, sticky="w")
         self.nom = tk.StringVar()
@@ -132,6 +139,10 @@ class App(tk.Tk):
         self.btn.grid(row=1, column=2)
         form.columnconfigure(0, weight=1)
         self.adr.trace_add("write", lambda *a: self._suggere_nom())
+        self.adr.trace_add("write", lambda *a: self._frappe())
+        self.liste = tk.Listbox(self, font=(FONT, 11), bg="#FFFFFF", fg=INK, relief="solid", bd=1, activestyle="none",
+                                selectbackground=RED, selectforeground="#FFFFFF", exportselection=False, height=1)
+        self.liste.bind("<ButtonRelease-1>", lambda ev: self._choisit())
 
         sortie = tk.Frame(self, bg=BG)
         sortie.pack(fill="x", padx=18, pady=(2, 6))
@@ -142,6 +153,9 @@ class App(tk.Tk):
         self.b_ouvrir = Button(sortie, "Ouvrir le dossier du résultat", self.ouvrir_dossier)
         self.b_ouvrir.pack(side="right")
         self.b_ouvrir.enable(False)
+        self.b_pdf = Button(sortie, "Ouvrir le plan cadastral (PDF)", self.ouvrir_pdf)
+        self.b_pdf.pack(side="right", padx=6)
+        self.b_pdf.enable(False)
 
         tk.Frame(self, bg=LINE, height=1).pack(fill="x", padx=18, pady=4)
 
@@ -156,7 +170,8 @@ class App(tk.Tk):
 
         self.log = tk.Text(self.t_suivi, font=("Consolas", 10), bg=FIELD, relief="flat", wrap="word", state="disabled")
         self.log.pack(fill="both", expand=True, padx=2, pady=2)
-        self._ecrire("Saisissez une adresse (Paris par défaut), puis ANALYSER.\n"
+        self._ecrire("Saisissez une adresse (Paris par défaut) : des suggestions apparaissent pendant la frappe. "
+                     "Choisissez-en une (↑ ↓ Entrée ou clic), puis ANALYSER.\n"
                      "Premier calcul : 30 s à 1 min (le nuage de points est téléchargé par morceaux).")
 
         self.txt = tk.Text(self.t_res, font=("Consolas", 10), bg=FIELD, relief="flat", wrap="none", state="disabled")
@@ -170,6 +185,85 @@ class App(tk.Tk):
         self.choix.bind("<<ComboboxSelected>>", lambda e: self._montre())
         self.canvas = tk.Canvas(self.t_img, bg="#FFFFFF", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
+
+    # ------------------------------------------------------------------ recherche interactive
+    def _frappe(self):
+        """Chaque frappe relance (après 300 ms de pause) la recherche de suggestions."""
+        if self._silence:
+            return
+        self.choisie = None
+        if self._timer:
+            self.after_cancel(self._timer)
+        t = self.adr.get().strip()
+        if len(t) < 3:
+            self._cache()
+            return
+        self._timer = self.after(300, lambda: self._cherche(t))
+
+    def _cherche(self, t):
+        self._seq += 1
+        n = self._seq
+
+        def tache():
+            try:
+                self.q.put(("sugg", (n, geo.suggerer(t))))
+            except Exception:                            # noqa: BLE001 — pas de suggestions : la saisie reste utilisable
+                pass
+        threading.Thread(target=tache, daemon=True).start()
+
+    def _montre_suggestions(self, n, liste):
+        if n != self._seq or not liste or self.focus_get() is not self.entry_adr:
+            if n == self._seq and not liste:
+                self._cache()
+            return
+        self.suggestions = liste
+        self.liste.delete(0, "end")
+        for a in liste:
+            self.liste.insert("end", "  " + a.label)
+        self.liste.config(height=min(len(liste), 8))
+        e = self.entry_adr
+        self.liste.place(x=e.winfo_rootx() - self.winfo_rootx(), y=e.winfo_rooty() - self.winfo_rooty() + e.winfo_height(),
+                         width=e.winfo_width())
+        self.liste.lift()
+
+    def _cache(self):
+        self.liste.place_forget()
+        self.suggestions = []
+
+    def _deplace(self, d):
+        if not self.suggestions:
+            return None
+        cur = self.liste.curselection()
+        i = (cur[0] + d) if cur else (0 if d > 0 else len(self.suggestions) - 1)
+        i = max(0, min(len(self.suggestions) - 1, i))
+        self.liste.selection_clear(0, "end")
+        self.liste.selection_set(i)
+        self.liste.see(i)
+        return "break"
+
+    def _choisit(self):
+        cur = self.liste.curselection()
+        if not cur or not self.suggestions:
+            return False
+        a = self.suggestions[cur[0]]
+        self._cache()
+        self._silence = True
+        try:
+            self.adr.set(a.label)
+        finally:
+            self._silence = False
+        self.choisie = a
+        self.entry_adr.icursor("end")
+        self.entry_adr.focus_set()
+        return True
+
+    def _entree(self, ev=None):
+        """Entrée : valide la suggestion surlignée ; sinon lance l'analyse."""
+        if self.suggestions and self.liste.curselection():
+            self._choisit()
+        else:
+            self._cache()
+            self.lancer()
 
     def _suggere_nom(self):
         if getattr(self, "_nom_modifie", False):
@@ -192,6 +286,10 @@ class App(tk.Tk):
         if self.res:
             open_path(self.res["dossier"])
 
+    def ouvrir_pdf(self):
+        if self.res and self.res.get("cadastre_pdf"):
+            open_path(os.path.join(self.res["dossier"], self.res["cadastre_pdf"]))
+
     # ------------------------------------------------------------------ calcul
     def _ecrire(self, s):
         self.log.config(state="normal")
@@ -208,6 +306,7 @@ class App(tk.Tk):
             return
         self.btn.enable(False)
         self.b_ouvrir.enable(False)
+        self.b_pdf.enable(False)
         self.settings.update(derniere_adresse=texte, dossier_sortie=self.out.get())
         save_settings(self.settings)
         self.nb.select(self.t_suivi)
@@ -216,7 +315,8 @@ class App(tk.Tk):
         self.log.config(state="disabled")
         nom = (self.nom.get().strip() or None)
         out = self.out.get()
-        threading.Thread(target=self._travail, args=(texte, out, nom), daemon=True).start()
+        cible = self.choisie if (self.choisie and self.choisie.label == texte) else texte
+        threading.Thread(target=self._travail, args=(cible, out, nom), daemon=True).start()
 
     def _travail(self, texte, out, nom):
         try:
@@ -240,6 +340,8 @@ class App(tk.Tk):
                         self.log.config(state="disabled")
                     self._dl = val.startswith("Nuage de points")
                     self._ecrire(val)
+                elif kind == "sugg":
+                    self._montre_suggestions(*val)
                 elif kind == "ok":
                     self._dl = False
                     self._fin(val)
@@ -257,6 +359,7 @@ class App(tk.Tk):
         self.res = res
         self.btn.enable(True)
         self.b_ouvrir.enable(True)
+        self.b_pdf.enable(bool(res.get("cadastre_pdf")))
         self.txt.config(state="normal")
         self.txt.delete("1.0", "end")
         self.txt.insert("end", export.synthese_texte(res))

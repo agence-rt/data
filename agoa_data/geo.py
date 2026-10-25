@@ -75,8 +75,36 @@ class Adresse:
     score: float
 
 
+def _adresse_de(f, defaut=""):
+    lon, lat = f["geometry"]["coordinates"]
+    x, y = _TO_L93(lon, lat)
+    p = f["properties"]
+    return Adresse(p.get("label", defaut), lon, lat, x, y, p.get("citycode", ""), float(p.get("score", 0)))
+
+
+def suggerer(texte, limite=7):
+    """Suggestions d'adresses pendant la frappe (API de géocodage, mode autocomplétion).
+
+    Recherche d'abord dans Paris (99 % des adresses) sauf si une autre ville ou un autre code postal est saisi.
+    """
+    texte = (texte or "").strip()
+    if len(texte) < 3:
+        return []
+    hors_paris = bool(re.search(r"\b(?!75)\d{5}\b", texte))
+    params = {"q": texte, "limit": limite, "autocomplete": 1}
+    if not hors_paris:
+        params["citycode"] = "75056"
+    feats = get_json(f"{GPF}/geocodage/search/", params, retries=2).get("features") or []
+    if not feats and not hors_paris:                       # rien à Paris : France entière
+        params.pop("citycode")
+        feats = get_json(f"{GPF}/geocodage/search/", params, retries=2).get("features") or []
+    return [_adresse_de(f, texte) for f in feats]
+
+
 def geocoder(texte):
     """Adresse libre → point (API de géocodage de la Géoplateforme, base adresse nationale)."""
+    if isinstance(texte, Adresse):                         # adresse déjà choisie dans les suggestions
+        return texte
     texte = (texte or "").strip()
     if not texte:
         raise DataError("Saisissez une adresse.")
@@ -89,11 +117,7 @@ def geocoder(texte):
         feats = d.get("features") or []
     if not feats:
         raise DataError(f"Adresse introuvable : {texte}")
-    f = feats[0]
-    lon, lat = f["geometry"]["coordinates"]
-    x, y = _TO_L93(lon, lat)
-    p = f["properties"]
-    return Adresse(p.get("label", texte), lon, lat, x, y, p.get("citycode", ""), float(p.get("score", 0)))
+    return _adresse_de(feats[0], texte)
 
 
 # --------------------------------------------------------------------------------------------
@@ -230,3 +254,45 @@ def dalles_lidar(geom_l93, marge=45.0):
     if not out:
         raise DataError("Pas de dalle LiDAR HD publiée pour ce secteur.")
     return sorted({d.nom: d for d in out}.values(), key=lambda a: a.nom)
+
+
+# --------------------------------------------------------------------------------------------
+# Données de contexte pour le plan cadastral
+def _polygones(geom):
+    return list(geom.geoms) if geom.geom_type in ("MultiPolygon", "GeometryCollection") else [geom]
+
+
+def parcelles_dans(emprise):
+    """Toutes les parcelles du Parcellaire Express touchant l'emprise (Polygon Lambert 93) → liste de Parcelle."""
+    d = _wfs_bbox("CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle", emprise, marge=0, count=1000)
+    out = []
+    for f in d.get("features", []):
+        p = f["properties"]
+        g = to_l93(shape(f["geometry"]))
+        for part in _polygones(g):
+            if part.geom_type == "Polygon" and not part.is_empty:
+                out.append(Parcelle(p.get("idu", ""), p.get("section", ""), str(p.get("numero", "")).lstrip("0") or "0",
+                                    float(p.get("contenance") or 0), part))
+    return out
+
+
+def batiments_dans(emprise):
+    """Emprises des bâtiments BD TOPO touchant l'emprise → liste de Polygon Lambert 93."""
+    d = _wfs_bbox("BDTOPO_V3:batiment", emprise, marge=0, count=1000)
+    out = []
+    for f in d.get("features", []):
+        g = to_l93(_drop_z(shape(f["geometry"])))
+        out += [a for a in _polygones(g) if a.geom_type == "Polygon" and a.area > 1]
+    return out
+
+
+def voies_dans(emprise):
+    """Voies nommées (BD TOPO) touchant l'emprise, regroupées par nom → liste de (nom, géométrie Lambert 93)."""
+    d = _wfs_bbox("BDTOPO_V3:troncon_de_route", emprise, marge=0, count=1000)
+    par_nom = {}
+    for f in d.get("features", []):
+        p = f["properties"]
+        nom = p.get("nom_voie_ban_gauche") or p.get("nom_voie_ban_droite")
+        if nom:
+            par_nom.setdefault(nom, []).append(to_l93(shape(f["geometry"])))
+    return [(n, unary_union(l)) for n, l in par_nom.items()]

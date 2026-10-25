@@ -26,7 +26,7 @@ class Fenetre(unittest.TestCase):
                    "batiments": [{"usage": "Résidentiel", "etages": 5, "annee": "1900", "volumetrie": {
                        "emprise_m2": 100, "altitude_sol": 50.0, "sol_min": 49.9, "sol_max": 50.1, "hauteur_moyenne": 15.0,
                        "hauteur_max": 18.0, "volume_m3": 1500}}],
-                   "coupes": [{"voie": "Rue Test", "type": "perpendiculaire", "fichier": "coupe_1_perp_Rue_Test.png",
+                   "cadastre_pdf": "plan_cadastral_x.pdf", "coupes": [{"voie": "Rue Test", "type": "perpendiculaire", "fichier": "coupe_1_perp_Rue_Test.png",
                                "resultats": {"batiment_traverse": True, "sol": 50.0, "egout": 65.0, "egout_h": 15.0,
                                              "faitage": 68.0, "faitage_h": 18.0}}]}
             app = agoa_app.App()
@@ -39,6 +39,7 @@ class Fenetre(unittest.TestCase):
                 self.assertEqual(len(app.choix["values"]), 2)
                 self.assertIn("perpendiculaire", app.choix["values"][1])
                 self.assertIn("1500 m³", app.txt.get("1.0", "end"))
+                self.assertTrue(app.b_pdf._enabled)
             finally:
                 app.destroy()
 

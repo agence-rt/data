@@ -9,7 +9,8 @@ ou en téléchargeant `AGOA-DATA-Setup-x.y.z.exe` dans la [dernière Release](ht
 L'application s'installe dans `C:\AGOA\data`.
 
 ## Ce que fait l'application
-1. **Adresse** → point (API de géocodage de la Géoplateforme, base adresse nationale).
+1. **Adresse** → point (API de géocodage de la Géoplateforme, base adresse nationale). La recherche est **interactive** : des suggestions
+   (Paris d'abord) s'affichent pendant la frappe ; ↑ ↓ + Entrée ou clic pour choisir, Échap pour fermer.
 2. **Parcelle** cadastrale (Parcellaire Express) puis **bâtiments** de la BD TOPO situés sur la parcelle.
 3. **Voies** nommées (BD TOPO) à moins de 25 m du bâtiment principal.
 4. **Dalles LiDAR HD** (nuage classifié, format COPC) couvrant l'emprise : seuls les morceaux utiles sont lus par requêtes HTTP partielles
@@ -33,6 +34,7 @@ Rangés dans `<dossier choisi>\<NOM>` (nom proposé selon la convention de l'age
 | `modele_toiture.asc` (+ `.prj`) | modèle numérique de toiture 0,5 m (altitudes NGF) : s'ouvre dans QGIS |
 | `coupe_N_perp_<voie>.png`, `coupe_N_para_<voie>.png` | coupes |
 | `plan_coupes.png` | plan de situation des coupes |
+| `plan_cadastral_<IDU>.pdf` | **plan cadastral** A4 vectoriel à l'échelle normalisée (1/200 à 1/5000), parcelle en rouge, numéros, bâtiments, noms de voies, échelle graphique, nord. Dessiné d'après les données ouvertes IGN : ce n'est pas l'extrait officiel DGFiP (à demander sur cadastre.gouv.fr si une valeur juridique est requise) |
 
 ## Limites
 - Ordre de grandeur (≈ 10 points/m²), pas un relevé de géomètre : lucarnes, souches et cours étroites sont mal restituées.

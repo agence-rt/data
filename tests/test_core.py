@@ -10,8 +10,8 @@ import numpy as np
 from shapely.geometry import LineString, box
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from agoa_data import coupes, pipeline, volumetrie          # noqa: E402
-from agoa_data.geo import Voie                                # noqa: E402
+from agoa_data import cadastre, coupes, geo, pipeline, volumetrie   # noqa: E402
+from agoa_data.geo import Adresse, Parcelle, Voie             # noqa: E402
 from agoa_data.httprange import HttpRangeFile                 # noqa: E402
 
 SOL, EGOUT, FAITAGE = 50.0, 62.0, 65.0      # altitudes (m)
@@ -83,6 +83,58 @@ class Dossier(unittest.TestCase):
         self.assertEqual(n("85 Rue Daguerre 75014 Paris"), "DAGUERRE85")
         self.assertEqual(n("7 Avenue de Saint-Ouen 75018 Paris"), "STOUEN7")
         self.assertEqual(n("12 bis Rue des Écoles 75005 Paris"), "ECOLES12BIS")
+
+
+class Suggestions(unittest.TestCase):
+    def test_suggerer_paris_puis_france(self):
+        appels = []
+        feat = {"geometry": {"coordinates": [2.3317, 48.8940]},
+                "properties": {"label": "198 Rue Championnet 75018 Paris", "citycode": "75118", "score": 0.89}}
+
+        def faux(url, params=None, **kw):
+            appels.append(dict(params))
+            return {"features": [feat] if "citycode" in params else []}
+        vrai, geo.get_json = geo.get_json, faux
+        try:
+            r = geo.suggerer("198 rue champ")
+            self.assertEqual(r[0].label, "198 Rue Championnet 75018 Paris")
+            self.assertEqual(appels[0]["citycode"], "75056")
+            self.assertEqual(appels[0]["autocomplete"], 1)
+            self.assertAlmostEqual(r[0].x, 651004.7, delta=5)
+            appels.clear()
+            self.assertEqual(geo.suggerer("12 rue de la paix 69000"), [])   # autre ville : pas de restriction à Paris
+            self.assertNotIn("citycode", appels[0])
+            self.assertEqual(geo.suggerer("ab"), [])                         # trop court : aucun appel
+        finally:
+            geo.get_json = vrai
+
+    def test_adresse_deja_choisie_non_regeocodee(self):
+        a = Adresse("1 Rue X 75001 Paris", 2.3, 48.8, 650000.0, 6860000.0, "75101", 0.9)
+        self.assertIs(geo.geocoder(a), a)
+
+
+class PlanCadastral(unittest.TestCase):
+    def test_echelle_normalisee(self):
+        self.assertEqual(cadastre.choisir_echelle(40, 30), 200)
+        self.assertEqual(cadastre.choisir_echelle(100, 50), 500)
+        self.assertEqual(cadastre.choisir_echelle(400, 100), 2000)
+        self.assertEqual(cadastre.choisir_echelle(5000, 5000), 5000)
+
+    def test_pdf_ecrit(self):
+        import tempfile
+        cible = box(1000, 2000, 1030, 2015)
+        parc = Parcelle("75118000AH0035", "AH", "35", 450.0, cible)
+        voisines = [Parcelle("x", "AH", "36", 300.0, box(1030, 2000, 1050, 2015)), parc]
+        adr = Adresse("1 Rue Test 75018 Paris", 2.3, 48.8, 1015.0, 2007.0, "75118", 1.0)
+        with tempfile.TemporaryDirectory() as d:
+            f = os.path.join(d, cadastre.nom_fichier(parc))
+            e = cadastre.tracer_plan_cadastral(adr, parc, f, voisines=voisines, batiments=[box(1005, 2003, 1025, 2012)],
+                                               voies=[("Rue Test", LineString([(990, 1990), (1060, 1995)]))])
+            self.assertEqual(os.path.basename(f), "plan_cadastral_75118000AH0035.pdf")
+            self.assertEqual(e, 500)                       # 60 x 45 m avec marges : ne tient ni à 1/200 ni à 1/250
+            with open(f, "rb") as fh:
+                self.assertEqual(fh.read(5), b"%PDF-")
+            self.assertGreater(os.path.getsize(f), 3000)
 
 
 class Plage(unittest.TestCase):
