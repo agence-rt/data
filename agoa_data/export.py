@@ -43,7 +43,7 @@ def ecrire_json(res, chemin):
 
 def synthese_texte(res):
     a, p = res["adresse"], res["parcelle"]
-    L = [f"AGOA VOL — volumétrie par nuage de points LiDAR HD", "",
+    L = [f"AGOA DATA — volumétrie par nuage de points LiDAR HD", "",
          f"Adresse    : {a['label']}",
          f"Parcelle   : {p['section']} {p['numero']} (IDU {p['idu']}), {p['contenance']:.0f} m² au cadastre",
          f"Dalles IGN : {', '.join(res['dalles'])}",

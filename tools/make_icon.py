@@ -1,6 +1,6 @@
 """Fabrique icon.ico : carré arrondi rouge agence, code de 2-3 lettres en gras (charte des icônes AGOA).
 
-    python tools/make_icon.py [CODE]      # CODE = VOL par défaut
+    python tools/make_icon.py [CODE]      # CODE = DA par défaut
 """
 import os
 import sys
@@ -8,7 +8,7 @@ import sys
 from PIL import Image, ImageDraw, ImageFont
 
 RED = (179, 38, 30, 255)            # #B3261E, rouge agence
-CODE = (sys.argv[1] if len(sys.argv) > 1 else "VOL").upper()
+CODE = (sys.argv[1] if len(sys.argv) > 1 else "DA").upper()
 POLICES = [r"C:\Windows\Fonts\arialbd.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
 S = 1024                            # dessin en grand puis réduction (lissage)

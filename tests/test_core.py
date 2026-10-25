@@ -1,4 +1,4 @@
-"""Tests du cœur d'AGOA VOL : aucun accès réseau (nuage synthétique, serveur HTTP local)."""
+"""Tests du cœur d'AGOA DATA : aucun accès réseau (nuage synthétique, serveur HTTP local)."""
 import http.server
 import math
 import os

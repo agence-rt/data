@@ -1,4 +1,4 @@
-"""AGOA VOL — volumétrie d'un bâtiment à partir du nuage de points LiDAR HD de l'IGN.
+"""AGOA DATA — volumétrie d'un bâtiment à partir du nuage de points LiDAR HD de l'IGN.
 
 Application Windows de la gamme AGOA (Python 3.10+, tkinter). Saisir une adresse : l'application
 trouve la parcelle, les bâtiments et les voies, télécharge le morceau utile du nuage de points,
@@ -110,7 +110,7 @@ class App(tk.Tk):
         head = tk.Frame(self, bg=BG)
         head.pack(fill="x", padx=18, pady=(14, 4))
         tk.Label(head, text="AGOA ", font=(FONT, 18, "bold"), bg=BG, fg=INK).pack(side="left")
-        tk.Label(head, text="VOL", font=(FONT, 18, "bold"), bg=BG, fg=RED).pack(side="left")
+        tk.Label(head, text="DATA", font=(FONT, 18, "bold"), bg=BG, fg=RED).pack(side="left")
         tk.Label(head, text=f"v{APP_VERSION}", font=(FONT, 8), bg=BG, fg=MUTED).pack(side="left", padx=(8, 0), pady=(8, 0))
         tk.Label(head, text="Volumétrie d'un bâtiment par nuage de points LiDAR HD (IGN)", font=(FONT, 9), bg=BG,
                  fg=MUTED).pack(side="right")
@@ -136,7 +136,7 @@ class App(tk.Tk):
         sortie = tk.Frame(self, bg=BG)
         sortie.pack(fill="x", padx=18, pady=(2, 6))
         tk.Label(sortie, text="Enregistrer dans :", font=(FONT, 9), bg=BG, fg=MUTED).pack(side="left")
-        self.out = tk.StringVar(value=self.settings.get("dossier_sortie") or os.path.join(os.path.expanduser("~"), "Documents", "AGOA VOL"))
+        self.out = tk.StringVar(value=self.settings.get("dossier_sortie") or os.path.join(os.path.expanduser("~"), "Documents", "AGOA DATA"))
         tk.Label(sortie, textvariable=self.out, font=(FONT, 9), bg=BG, fg=INK).pack(side="left", padx=6)
         Button(sortie, "Changer…", self.choisir_dossier).pack(side="left", padx=4)
         self.b_ouvrir = Button(sortie, "Ouvrir le dossier du résultat", self.ouvrir_dossier)
@@ -287,7 +287,7 @@ class App(tk.Tk):
 
 def selftest():
     """Vérifie que toutes les briques (y compris celles chargées dynamiquement) sont présentes dans le programme compilé.
-    Appelé par la CI : `AGOA VOL.exe --selftest` doit se terminer avec le code 0."""
+    Appelé par la CI : `AGOA DATA.exe --selftest` doit se terminer avec le code 0."""
     import io
     import tempfile
     log = []
@@ -302,7 +302,7 @@ def selftest():
             log.append(f"ÉCHEC {nom} : {e!r}")
     texte = "\n".join(log)
     try:
-        with open(os.path.join(tempfile.gettempdir(), "agoa_vol_selftest.txt"), "w", encoding="utf-8") as f:
+        with open(os.path.join(tempfile.gettempdir(), "agoa_data_selftest.txt"), "w", encoding="utf-8") as f:
             f.write(texte)
     except OSError:
         pass

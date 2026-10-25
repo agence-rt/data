@@ -1,18 +1,18 @@
-; Installateur d'AGOA VOL (construit par GitHub Actions : makensis /DVERSION=x.y.z installer.nsi)
-; Le lanceur AGOA l'exécute en silencieux : AGOA-VOL-Setup-x.y.z.exe /S /D=C:\AGOA\vol
+; Installateur d'AGOA DATA (construit par GitHub Actions : makensis /DVERSION=x.y.z installer.nsi)
+; Le lanceur AGOA l'exécute en silencieux : AGOA-DATA-Setup-x.y.z.exe /S /D=C:\AGOA\data
 Unicode true
 !include "MUI2.nsh"
 
-!define APPNAME "AGOA VOL"
-!define EXENAME "AGOA VOL.exe"
-!define REGKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\AGOAVOL"
+!define APPNAME "AGOA DATA"
+!define EXENAME "AGOA DATA.exe"
+!define REGKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\AGOADATA"
 !ifndef VERSION
   !define VERSION "0.0.0"
 !endif
 
 Name "${APPNAME}"
-OutFile "dist\AGOA-VOL-Setup-${VERSION}.exe"
-InstallDir "C:\AGOA\vol"
+OutFile "dist\AGOA-DATA-Setup-${VERSION}.exe"
+InstallDir "C:\AGOA\data"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 BrandingText "AGOA - Agence Rémi Thollet"
@@ -57,7 +57,7 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
-  ; les résultats (dossiers d'analyse) ne sont jamais supprimés : ils sont ailleurs que dans C:\AGOA\vol
+  ; les résultats (dossiers d'analyse) ne sont jamais supprimés : ils sont ailleurs que dans C:\AGOA\data
   Delete "$INSTDIR\${EXENAME}"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"

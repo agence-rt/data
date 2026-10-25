@@ -1,12 +1,12 @@
-# AGOA VOL
+# AGOA DATA
 Application Windows de la gamme AGOA : **volumétrie d'un bâtiment à partir du nuage de points LiDAR HD de l'IGN**.
 Saisir une adresse (Paris par défaut) : l'application trouve la parcelle, les bâtiments et les voies, télécharge le morceau utile
 du nuage de points, calcule la volumétrie et trace les coupes.
 
 ## Installer
 Via le **launcher AGOA** (le programme apparaît dans la liste une fois ajouté à `catalog.json`, voir plus bas),
-ou en téléchargeant `AGOA-VOL-Setup-x.y.z.exe` dans la [dernière Release](https://github.com/agence-rt/data/releases/latest).
-L'application s'installe dans `C:\AGOA\vol`.
+ou en téléchargeant `AGOA-DATA-Setup-x.y.z.exe` dans la [dernière Release](https://github.com/agence-rt/data/releases/latest).
+L'application s'installe dans `C:\AGOA\data`.
 
 ## Ce que fait l'application
 1. **Adresse** → point (API de géocodage de la Géoplateforme, base adresse nationale).
@@ -49,25 +49,25 @@ py -m agoa_data "198 rue Championnet, Paris" "C:\Resultats"
 ## Développement
 - Python 3.10+, interface tkinter ; calcul : numpy, shapely, pyproj, laspy (+ lazrs), matplotlib.
 - `py -m unittest discover -s tests` : tests du cœur (nuage synthétique, serveur HTTP local) et de la fenêtre (ignorés sans écran).
-- `build.bat` : compile `AGOA VOL.exe` en local. `python tools/make_icon.py VOL` régénère `icon.ico` (carré rouge agence, code en gras).
+- `build.bat` : compile `AGOA DATA.exe` en local. `python tools/make_icon.py DA` régénère `icon.ico` (carré rouge agence, code en gras).
 - Un seul serveur est interrogé : `data.geopf.fr` (Géoplateforme IGN). Il doit être autorisé si le poste filtre le réseau.
 
 ## Publier une version
 Augmenter `APP_VERSION` dans `agoa_data/__init__.py` puis pousser sur `main` : GitHub Actions lance les tests, compile le programme,
 fabrique l'installateur (`installer.nsi`) et crée la Release (étiquette automatique).
 
-## Ajouter AGOA VOL au launcher
+## Ajouter AGOA DATA au launcher
 Dans `catalog.json` du dépôt [agence-rt/agoa](https://github.com/agence-rt/agoa), ajouter à la liste `apps` (aucune recompilation du launcher) :
 
 ```json
 {
-  "id": "vol",
-  "code": "VOL",
-  "nom": "AGOA VOL",
+  "id": "data",
+  "code": "DA",
+  "nom": "AGOA DATA",
   "description": "Volumétrie d'un bâtiment par nuage de points LiDAR HD : parcelle, coupes perpendiculaires aux voies, égout et faîtage",
   "repo": "agence-rt/data",
-  "asset": "AGOA-VOL-Setup-*.exe",
-  "exe": "AGOA VOL.exe"
+  "asset": "AGOA-DATA-Setup-*.exe",
+  "exe": "AGOA DATA.exe"
 }
 ```
 

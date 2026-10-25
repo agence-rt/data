@@ -10,7 +10,7 @@ def main(argv=None):
     if not argv:
         print(__doc__)
         return 2
-    sortie = argv[1] if len(argv) > 1 else os.path.join(os.path.expanduser("~"), "AGOA VOL")
+    sortie = argv[1] if len(argv) > 1 else os.path.join(os.path.expanduser("~"), "AGOA DATA")
     res = pipeline.analyser(argv[0], sortie, progress=print, cache=os.path.join(sortie, "_cache"))
     print()
     print(export.synthese_texte(res))

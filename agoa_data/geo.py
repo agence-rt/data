@@ -16,7 +16,7 @@ from shapely.geometry import LineString, Point, Polygon, shape
 from shapely.ops import linemerge, transform, unary_union
 
 GPF = "https://data.geopf.fr"      # un seul serveur : adresse, cadastre, BD TOPO, LiDAR HD
-UA = "AGOA-VOL/1.0"
+UA = "AGOA-DATA/1.0"
 
 _TO_L93 = Transformer.from_crs(4326, 2154, always_xy=True).transform
 _TO_WGS = Transformer.from_crs(2154, 4326, always_xy=True).transform

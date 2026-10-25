@@ -1,11 +1,11 @@
-# Teste, compile AGOA VOL, fabrique son installateur et publie la Release
+# Teste, compile AGOA DATA, fabrique son installateur et publie la Release
 # dès que APP_VERSION change sur main. L'étiquette vX.Y.Z est créée automatiquement.
-name: Publication AGOA VOL
+name: Publication AGOA DATA
 on:
   push:
     branches: [main]
     paths:
-      - "agoa_vol.py"
+      - "agoa_app.py"
       - "agoa_data/**"
       - "installer.nsi"
       - "icon.ico"
@@ -13,7 +13,7 @@ on:
       - ".github/workflows/release.yml"
   pull_request:
     paths:
-      - "agoa_vol.py"
+      - "agoa_app.py"
       - "agoa_data/**"
       - "tests/**"
   workflow_dispatch:
@@ -47,13 +47,13 @@ jobs:
           fi
       - name: Compilation du programme
         if: steps.v.outputs.skip == 'false'
-        run: pyinstaller --noconsole --onefile --icon icon.ico --add-data "icon.ico;." --collect-submodules laspy --hidden-import lazrs --collect-data pyproj --name "AGOA VOL" agoa_vol.py
+        run: pyinstaller --noconsole --onefile --icon icon.ico --add-data "icon.ico;." --collect-submodules laspy --hidden-import lazrs --collect-data pyproj --name "AGOA DATA" agoa_app.py
       - name: Auto-test du programme compilé
         if: steps.v.outputs.skip == 'false'
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath "dist\AGOA VOL.exe" -ArgumentList "--selftest" -Wait -PassThru
-          $log = Join-Path $env:TEMP "agoa_vol_selftest.txt"
+          $p = Start-Process -FilePath "dist\AGOA DATA.exe" -ArgumentList "--selftest" -Wait -PassThru
+          $log = Join-Path $env:TEMP "agoa_data_selftest.txt"
           if (Test-Path $log) { Get-Content $log }
           if ($p.ExitCode -ne 0) { Write-Error "L'auto-test du programme compilé a échoué (code $($p.ExitCode))."; exit 1 }
       - name: Fabrication de l'installateur
@@ -71,5 +71,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "v${{ steps.v.outputs.version }}" "dist/AGOA-VOL-Setup-${{ steps.v.outputs.version }}.exe" \
-            --title "AGOA VOL ${{ steps.v.outputs.version }}" --generate-notes --target "${{ github.sha }}"
+          gh release create "v${{ steps.v.outputs.version }}" "dist/AGOA-DATA-Setup-${{ steps.v.outputs.version }}.exe" \
+            --title "AGOA DATA ${{ steps.v.outputs.version }}" --generate-notes --target "${{ github.sha }}"

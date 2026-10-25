@@ -34,7 +34,7 @@ class HttpRangeFile(io.RawIOBase):
             if wait > 0:
                 time.sleep(wait)
             req = urllib.request.Request(self.url, headers={"Range": f"bytes={start}-{end}",
-                                                            "User-Agent": "AGOA-VOL/1.0"})
+                                                            "User-Agent": "AGOA-DATA/1.0"})
             try:
                 self._last = time.monotonic()
                 with urllib.request.urlopen(req, timeout=self.timeout, context=self._ctx) as r:

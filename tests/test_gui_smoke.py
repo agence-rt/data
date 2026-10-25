@@ -7,7 +7,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 try:
     import tkinter
-    import agoa_vol
+    import agoa_app
     tkinter.Tk().destroy()
     DISPO = True
 except Exception:                                   # noqa: BLE001 — pas de tkinter / pas d'écran
@@ -29,7 +29,7 @@ class Fenetre(unittest.TestCase):
                    "coupes": [{"voie": "Rue Test", "type": "perpendiculaire", "fichier": "coupe_1_perp_Rue_Test.png",
                                "resultats": {"batiment_traverse": True, "sol": 50.0, "egout": 65.0, "egout_h": 15.0,
                                              "faitage": 68.0, "faitage_h": 18.0}}]}
-            app = agoa_vol.App()
+            app = agoa_app.App()
             try:
                 app.adr.set("198 rue Championnet")
                 app.update()
