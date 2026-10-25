@@ -1,0 +1,6 @@
+numpy>=1.26
+shapely>=2.0
+pyproj>=3.6
+laspy[lazrs]>=2.5
+matplotlib>=3.8
+pillow>=10

@@ -1,0 +1,75 @@
+# Teste, compile AGOA VOL, fabrique son installateur et publie la Release
+# dès que APP_VERSION change sur main. L'étiquette vX.Y.Z est créée automatiquement.
+name: Publication AGOA VOL
+on:
+  push:
+    branches: [main]
+    paths:
+      - "agoa_vol.py"
+      - "agoa_data/**"
+      - "installer.nsi"
+      - "icon.ico"
+      - "requirements.txt"
+      - ".github/workflows/release.yml"
+  pull_request:
+    paths:
+      - "agoa_vol.py"
+      - "agoa_data/**"
+      - "tests/**"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Dépendances
+        run: pip install -r requirements.txt pyinstaller
+      - name: Tests (cœur + fenêtre)
+        run: python -m unittest discover -s tests -v
+      - name: Version à publier
+        id: v
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(grep -oP '^APP_VERSION = "\K[^"]+' agoa_data/__init__.py)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VERSION" > /dev/null 2>&1; then
+            echo "La Release v$VERSION existe déjà : rien à publier."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Compilation du programme
+        if: steps.v.outputs.skip == 'false'
+        run: pyinstaller --noconsole --onefile --icon icon.ico --add-data "icon.ico;." --collect-submodules laspy --hidden-import lazrs --collect-data pyproj --name "AGOA VOL" agoa_vol.py
+      - name: Auto-test du programme compilé
+        if: steps.v.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\AGOA VOL.exe" -ArgumentList "--selftest" -Wait -PassThru
+          $log = Join-Path $env:TEMP "agoa_vol_selftest.txt"
+          if (Test-Path $log) { Get-Content $log }
+          if ($p.ExitCode -ne 0) { Write-Error "L'auto-test du programme compilé a échoué (code $($p.ExitCode))."; exit 1 }
+      - name: Fabrication de l'installateur
+        if: steps.v.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          $nsis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
+          if (-not $nsis) { $nsis = "C:\Program Files (x86)\NSIS\makensis.exe" }
+          if (-not (Test-Path $nsis)) { choco install nsis -y --no-progress; $nsis = "C:\Program Files (x86)\NSIS\makensis.exe" }
+          & $nsis "/DVERSION=${{ steps.v.outputs.version }}" installer.nsi
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Publication
+        if: steps.v.outputs.skip == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ steps.v.outputs.version }}" "dist/AGOA-VOL-Setup-${{ steps.v.outputs.version }}.exe" \
+            --title "AGOA VOL ${{ steps.v.outputs.version }}" --generate-notes --target "${{ github.sha }}"
