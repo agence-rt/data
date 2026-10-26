@@ -5,7 +5,7 @@ import re
 import unicodedata
 
 from . import APP_VERSION
-from . import cadastre, dwg, export, facade_photos, facades, geo, lidar, mosaique, plans, volumetrie
+from . import cadastre, dwg, export, facade_photos, facades, geo, lidar, mosaique, plans, vue_unique, volumetrie
 from . import coupes as cp
 
 TYPES_VOIE = {"rue", "avenue", "av", "boulevard", "bd", "place", "pl", "passage", "impasse", "villa", "allee",
@@ -118,10 +118,11 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
                 _l.append(str(m))
                 say(m)
             try:                                   # etape 1 : assemblage des vues de rue (RDC + 2 etages)
-                hz = (f.r.get("h_rdc") or 3.0) + 2 * 2.8 + 0.6
-                _, dm = mosaique.ecrire(f, os.path.join(dfac, f"assemblage_{i}"), z_haut=hz, say=dire)
-                dire(f"Assemblage : {dm['taille_px'][0]}x{dm['taille_px'][1]} px, couverture {int(dm['couverture']*100)} %")
-                asm = {"dossier": f"assemblage_{i}", "fichier": f"assemblage_{i}/assemblage.jpg", "couverture": dm["couverture"]}
+                if "h_rdc" not in f.r:             # niveaux non saisis : estimation depuis le nombre de niveaux BD TOPO
+                    facades.definir_niveaux(f, max(int(f.r.get("niveaux_n", 7)) - 1, 1))
+                _, dm = vue_unique.traiter(f, os.path.join(dfac, f"assemblage_{i}"), say=dire, n_etages=2)
+                dire(f"Vue redressée : {len(dm['travees_m'])} travées détectées ; planchers lus {dm['planchers_lus_m']} (attendus {dm['planchers_attendus_m']})")
+                asm = {"dossier": f"assemblage_{i}", "fichier": f"assemblage_{i}/3_travees_numerotees.jpg", "travees": len(dm["travees_m"])}
             except Exception as ex:
                 dire(f"Assemblage Panoramax impossible : {ex}")
                 lignes.append(traceback.format_exc())
