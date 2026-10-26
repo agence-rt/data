@@ -4,7 +4,7 @@ import os
 import re
 import unicodedata
 
-from . import cadastre, dwg, export, facade_photos, facades, geo, lidar, plans, volumetrie
+from . import cadastre, dwg, export, facade_photos, facades, geo, lidar, mosaique, plans, volumetrie
 from . import coupes as cp
 
 TYPES_VOIE = {"rue", "avenue", "av", "boulevard", "bd", "place", "pl", "passage", "impasse", "villa", "allee",
@@ -106,7 +106,13 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
         ph = None
         if niveaux_visibles:
             facades.definir_niveaux(f, niveaux_visibles)
-        if avec_photos and "abscisses" in f.r:
+        if avec_photos and "abscisses" in f.r and facade_seule:
+            try:                                   # étape 1 : assemblage des vues de rue (RDC + 2 étages)
+                _, dm = mosaique.ecrire(f, os.path.join(dfac, f"assemblage_{i}"), z_haut=(f.h_rdc if hasattr(f, "h_rdc") else 3.0) + 2 * 2.8 + 0.6, say=say)
+                say(f"Assemblage : {dm['taille_px'][0]}x{dm['taille_px'][1]} px, couverture {int(dm['couverture']*100)} %")
+            except Exception as ex:
+                say(f"⚠ Assemblage Panoramax impossible : {ex}")
+        elif avec_photos and "abscisses" in f.r:
             ph = facade_photos.traiter(f, i, dfac, say=say, photos_dir=photos_dir, n_visibles=niveaux_visibles)
             for w in ph["avertissements"]:
                 say("⚠ " + w)
