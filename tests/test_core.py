@@ -219,3 +219,24 @@ class Plage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Facades(unittest.TestCase):
+    def test_facade_sur_rue(self):
+        import tempfile
+        from agoa_data import facades
+        pts, emprise = nuage_toit_deux_pans()
+        rue = Voie("Rue Test", LineString([(990, 1992), (1030, 1992)]), 8.0)
+        parcelle = box(1000, 1995, 1020, 2010)
+        fac = facades.definir_facades(emprise, parcelle, [rue])
+        self.assertEqual(len(fac), 1)
+        f = fac[0]
+        self.assertAlmostEqual(f.longueur, L, delta=0.6)
+        self.assertAlmostEqual(f.front_parcelle, L, delta=0.6)
+        facades.profils(pts, f, emprise, SOL, etages=4)
+        self.assertIn("4", facades.resume(f)["niveaux"] if "niveaux" in facades.resume(f) else "4")
+        d = tempfile.mkdtemp()
+        facades.tracer_facade(f, os.path.join(d, "f.png"))
+        facades.ecrire_facades_dxf(fac, os.path.join(d, "f.dxf"))
+        self.assertTrue(os.path.getsize(os.path.join(d, "f.dxf")) > 1000)
+        self.assertTrue(os.path.exists(os.path.join(d, "f.png")))

@@ -4,7 +4,7 @@ import os
 import re
 import unicodedata
 
-from . import cadastre, dwg, export, geo, lidar, plans, volumetrie
+from . import cadastre, dwg, export, facades, geo, lidar, plans, volumetrie
 from . import coupes as cp
 
 TYPES_VOIE = {"rue", "avenue", "av", "boulevard", "bd", "place", "pl", "passage", "impasse", "villa", "allee",
@@ -31,10 +31,11 @@ def _dossier(adr, dossier_sortie, sous, nom=None):
     return d
 
 
-def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None):
+def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facade_seule=False):
     """Exécute toute la chaîne et écrit les livrables dans `dossier_sortie/<NOM>/`. Retourne un dict de résultats.
 
     `adresse` : texte libre ou `geo.Adresse` (déjà choisie dans les suggestions).
+    `facade_seule` : ne produit que le dessin des façades sur rue (dossier `facade`), sans les livrables de volumétrie.
     """
     say = progress or (lambda s: None)
     say("Recherche de l'adresse…")
@@ -54,7 +55,7 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None):
     for b in bats[1:]:
         zone = zone.union(b.geom)
     dalles = geo.dalles_lidar(zone, marge=45)
-    dossier = _dossier(adr, dossier_sortie, "volumetrie", nom)
+    dossier = _dossier(adr, dossier_sortie, "facade" if facade_seule else "volumetrie", nom)
     pts = lidar.points_sur_emprise(dalles, zone, marge=40, progress=say, cache_dir=cache)
     say(f"{len(pts):,} points reçus ; calcul des volumes…".replace(",", " "))
 
@@ -89,9 +90,29 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None):
         donnees.append((c, q, z, cl))
         sens = "perp" if c.type == "perpendiculaire" else "para"
         fn = f"coupe_{i}_{sens}_{re.sub(r'[^A-Za-z0-9]+', '_', c.nom)}.png"
-        cp.tracer_coupe(c, q, z, cl, b0.geom, os.path.join(dossier, fn))
+        if not facade_seule:
+            cp.tracer_coupe(c, q, z, cl, b0.geom, os.path.join(dossier, fn))
         sorties.append({"voie": c.nom, "type": c.type, "distance_voie_batiment": round(c.voie_distance, 1),
                         "fichier": fn, "resultats": {k: (round(x, 2) if isinstance(x, float) else x) for k, x in c.r.items()}})
+    say("Façades sur rue…")
+    dfac = dossier if facade_seule else _dossier(adr, dossier_sortie, "facade", nom)
+    fac = facades.definir_facades(b0.geom, parc.geom, voies)
+    fac_res = []
+    for i, f in enumerate(fac, 1):
+        facades.profils(pts, f, b0.geom, v0.altitude_sol, b0.etages)
+        fn = f"facade_{i}_{re.sub(r'[^A-Za-z0-9]+', '_', f.voie)}.png"
+        if "abscisses" in f.r:
+            facades.tracer_facade(f, os.path.join(dfac, fn))
+        fac_res.append({**facades.resume(f), "fichier": fn})
+    if fac:
+        facades.ecrire_facades_dxf(fac, os.path.join(dfac, "facades.dxf"))
+    if facade_seule:
+        res = {"mode": "facade", "adresse": {"label": adr.label}, "parcelle": {"idu": parc.idu, "section": parc.section,
+               "numero": parc.numero, "contenance": parc.contenance}, "facades": fac_res, "facades_dxf": "facades.dxf" if fac else None,
+               "dossier": dossier, "date": datetime.datetime.now().strftime("%d/%m/%Y %H:%M")}
+        export.ecrire_json(res, os.path.join(dossier, "facades.json"))
+        say("Terminé.")
+        return res
     cp.tracer_plan(pts, b0.geom, parc, voies, liste, os.path.join(dossier, "plan_coupes.png"))
 
     say("Écriture des fichiers…")
@@ -105,7 +126,8 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None):
            "dalles": [d.nom for d in dalles], "date": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
            "n_points": int(len(pts)), "batiments": res_b, "voies": [{"nom": v.nom, "distance": round(v.distance, 1)} for v in voies],
            "coupes": sorties, "dossier": dossier, "mode": "volumetrie",
-           "nuage_dxf": "nuage_decoupe.dxf", "n_points_dxf": n_dxf, "coupes_dxf": "coupes.dxf"}
+           "nuage_dxf": "nuage_decoupe.dxf", "n_points_dxf": n_dxf, "coupes_dxf": "coupes.dxf",
+           "facades": fac_res, "dossier_facade": dfac}
     export.ecrire_json(res, os.path.join(dossier, "resultats.json"))
     with open(os.path.join(dossier, "synthese.txt"), "w", encoding="utf-8") as f:
         f.write(export.synthese_texte(res))

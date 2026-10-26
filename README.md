@@ -8,7 +8,7 @@ Via le **launcher AGOA** (le programme apparaît dans la liste une fois ajouté 
 ou en téléchargeant `AGOA-DATA-Setup-x.y.z.exe` dans la [dernière Release](https://github.com/agence-rt/data/releases/latest).
 L'application s'installe dans `C:\AGOA\data`.
 
-## Trois fonctions, trois boutons
+## Quatre fonctions, quatre boutons
 Saisir une adresse (suggestions pendant la frappe), choisir le dossier **ENREGISTRER SOUS**, puis :
 
 1. **CADASTRES (PDF A3)** — trois plans cadastraux A3 vectoriels (1/500, 1/1000, 1/2000), voir *Livrables*.
@@ -27,6 +27,12 @@ Saisir une adresse (suggestions pendant la frappe), choisir le dossier **ENREGIS
    - limites : un scan est vectorisé par traitement d'image (traits fins parfois fragmentés, textes et cotes restent des tracés) ; si le plan ne couvre
      qu'une partie du bâtiment, le recalage est signalé « peu fiable » et il faut vérifier l'aperçu ; plusieurs plans d'un même immeuble sont superposés
      sur le même emplacement, chacun dans ses calques.
+
+4. **FAÇADES SUR RUE** (niveau 1) — dessin de l'enveloppe de chaque façade donnant sur une voie, dans `<NOM>\facade` :
+   `facade_<n>_<VOIE>.png` et `facades.dxf` (calques `F<n>_<VOIE>_SOL / FACADE / TOITURE / NIVEAUX / COTES / TEXTES`, mètres, altitudes NGF).
+   Longueur = côté du bâtiment BD TOPO face à la rue (pièces alignées regroupées, front de parcelle indiqué pour contrôle),
+   hauteurs = nuage LiDAR (sol, égout, silhouette du toit), niveaux = BD TOPO ou estimation à 2,90 m. **Pas d'ouvertures** :
+   elles viendront au niveau 2 (photos Panoramax / Mapillary / vos photos, dossier façade du Dropbox de l'immeuble).
 
 ## Volumétrie : ce que fait l'application
 1. **Adresse** → point (API de géocodage de la Géoplateforme, base adresse nationale). La recherche est **interactive** : des suggestions

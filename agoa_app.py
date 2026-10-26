@@ -155,6 +155,7 @@ class App(tk.Tk):
             Button(barre, "1 · CADASTRES  (PDF A3)", lambda: self.lancer("cadastre"), primary=True),
             Button(barre, "2 · VOLUMÉTRIE  (nuage de points)", lambda: self.lancer("volumetrie"), primary=True),
             Button(barre, "3 · PLANS DWG  (depuis PDF)…", lambda: self.lancer("dwg"), primary=True),
+            Button(barre, "4 · FAÇADES SUR RUE", lambda: self.lancer("facade"), primary=True),
         ]
         for b in self.actions:
             b.pack(side="left", padx=(0, 8))
@@ -352,6 +353,8 @@ class App(tk.Tk):
                 res = pipeline.cadastres(args[0], out, progress=say)
             elif mode == "dwg":
                 res = pipeline.plans_dwg(args[0], args[1], out, echelle=args[2], progress=say)
+            elif mode == "facade":
+                res = pipeline.analyser(args[0], out, progress=say, cache=os.path.join(out, "_cache"), facade_seule=True)
             else:
                 res = pipeline.analyser(args[0], out, progress=say, cache=os.path.join(out, "_cache"))
             self.q.put(("ok", res))
@@ -403,6 +406,15 @@ class App(tk.Tk):
             for c in res["coupes"]:
                 t = "perpendiculaire à la" if c["type"] == "perpendiculaire" else "parallèle à la"
                 self.fichiers[f"Coupe {t} {c['voie']}"] = os.path.join(d, c["fichier"])
+        elif mode == "facade":
+            L = [f"Façades sur rue — {res['adresse']['label']}", "", "Niveau 1 : enveloppe (longueur, sol, égout, silhouette du toit, niveaux), sans ouvertures.", ""]
+            for f in res["facades"]:
+                L.append(f"{f['voie']} : longueur {f['longueur_m']:.2f} m" + (f" (front de parcelle {f['front_parcelle_m']:.1f} m)" if f.get("front_parcelle_m") else ""))
+                self.fichiers[f"Façade {f['voie']}"] = os.path.join(d, f["fichier"])
+            if not res["facades"]:
+                L.append("Aucune façade sur rue identifiée.")
+            L += ["", f"Dossier : {d}", "Fichier facades.dxf : calques F<n>_<VOIE>_SOL / FACADE / TOITURE / NIVEAUX / COTES / TEXTES (mètres, altitudes NGF)."]
+            self.txt.insert("end", "\n".join(L))
         elif mode == "cadastre":
             self.txt.insert("end", f"Plans cadastraux — {res['adresse']['label']}\nParcelle {res['parcelle']['section']} "
                                    f"{res['parcelle']['numero']} (IDU {res['parcelle']['idu']})\n\n" + "\n".join(res["cadastre_pdfs"]) +

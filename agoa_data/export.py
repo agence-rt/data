@@ -76,6 +76,19 @@ def synthese_texte(res):
         pente = f", pente indicative {r['pente_deg']:.0f}°" if "pente_deg" in r else ""
         L.append(f"  Coupe {sens}{c['voie']} : sol {r['sol']:.1f} NGF | égout {r['egout_h']:.1f} m ({r['egout']:.1f} NGF) | "
                  f"faîtage {r['faitage_h']:.1f} m ({r['faitage']:.1f} NGF){pente}")
+    if res.get("facades"):
+        L += ["", "Façades sur rue (niveau 1 : enveloppe et niveaux estimés ; dessin dans le dossier facade)"]
+        for f in res["facades"]:
+            ligne = f"  {f['voie']} : longueur {f['longueur_m']:.2f} m"
+            if f.get("front_parcelle_m"):
+                ligne += f" (front de parcelle ≈ {f['front_parcelle_m']:.1f} m)"
+            if "egout_h" in f:
+                ligne += f" | égout {f['egout_h']:.1f} m au-dessus du sol"
+            if "faitage_h" in f:
+                ligne += f" | point haut {f['faitage_h']:.1f} m"
+            if "niveaux_n" in f:
+                ligne += f" | {f['niveaux_n']} niveaux ({f['niveaux_source']})"
+            L.append(ligne)
     L += ["", "Limites : ordre de grandeur (≈10 points/m²). Le volume va du sol au toit (combles et niveau bas inclus, sous-sols exclus).",
           "Sol = médiane des points « sol » autour du bâtiment ; en terrain en pente, les hauteurs varient de ±0,5 m selon la façade.",
           "Sources : Géoplateforme IGN (adresse, Parcellaire Express, BD TOPO, LiDAR HD) — Licence Ouverte 2.0."]
