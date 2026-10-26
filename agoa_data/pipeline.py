@@ -136,16 +136,18 @@ def plans_dwg(pdfs, adresse, dossier_sortie, echelle=None, progress=None):
         raise geo.DataError("Choisissez au moins un plan PDF.")
     adr = parc = None
     contexte = None
-    cible = None
+    cibles = []
     if adresse:
         say("Recherche de l'adresse…")
         adr = geo.geocoder(adresse)
         say(f"Adresse : {adr.label} ; parcelle et bâtiments…")
         parc = geo.parcelle_au_point(adr)
         bats = geo.batiments_de_la_parcelle(parc)
-        cible = bats[0].geom if bats else parc.geom
+        batiments_parcelle = bats[0].geom if bats else None
         for b in bats[1:]:
-            cible = cible.union(b.geom)
+            batiments_parcelle = batiments_parcelle.union(b.geom)
+        cibles = [("bâtiments de la parcelle", batiments_parcelle)] if batiments_parcelle is not None else []
+        cibles.append(("parcelle", parc.geom))             # les caves débordent souvent de l'emprise bâtie
         zone = parc.geom.buffer(70).envelope
         contexte = {"parcelle": parc, "voisines": geo.parcelles_dans(zone), "batiments": geo.batiments_dans(zone)}
         dossier = _dossier(adr, dossier_sortie)
@@ -168,12 +170,17 @@ def plans_dwg(pdfs, adresse, dossier_sortie, echelle=None, progress=None):
             f"({'imposée' if echelle else 'lue dans le PDF'}), {len(pl.traces)} tracés")
         calques = plans.classer(pl, ech)
         try:
-            rec = plans.recaler(calques, cible)
+            if cibles:
+                essais = [(lib, plans.recaler(calques, g)) for lib, g in cibles]
+                lib, rec = max(essais, key=lambda t: t[1].iou)
+                say(f"  recalage sur : {lib}")
+            else:
+                rec = plans.recaler(calques, None)
         except plans.PlanError as e:
             raise geo.DataError(f"{nom} : {e}") from e
         for w in rec.avertissements:
             say("  ⚠ " + w)
-        if cible is not None:
+        if cibles:
             say(f"  recalé : rotation {rec.angle_deg:.1f}°, dimensions ×{rec.echelle:.3f}, recouvrement {100 * rec.iou:.0f} %")
         places.append((nom, plans.appliquer(calques, rec), rec.angle_deg))
         rapport.append({"plan": nom, "echelle": ech, "scanne": pl.scanne, "rotation_deg": round(rec.angle_deg, 2),

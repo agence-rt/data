@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 
-COULEURS = {"MURS": 7, "TRAITS": 8, "TEXTES_COTES": 6, "TEXTES": 3}      # couleurs AutoCAD (ACI)
+COULEURS = {"MURS": 7, "TRAITS": 8, "COTES": 4, "TEXTES_COTES": 6, "TEXTES": 3}      # couleurs AutoCAD (ACI)
 
 
 def nom_calque(s):
@@ -22,7 +22,7 @@ def ecrire_dxf(chemin, plans, cadastre=None):
     """`plans` : liste de (nom, calques en Lambert 93, angle_deg) ; `cadastre` : dict {parcelle, voisines, batiments, numeros}.
 
     Calques créés : CADASTRE_PARCELLE_CIBLE, CADASTRE_PARCELLES, CADASTRE_NUMEROS, CADASTRE_BATIMENTS, puis <PLAN>_MURS,
-    <PLAN>_TRAITS, <PLAN>_TEXTES_COTES, <PLAN>_TEXTES pour chaque plan PDF.
+    <PLAN>_TRAITS, <PLAN>_COTES, <PLAN>_TEXTES_COTES, <PLAN>_TEXTES pour chaque plan PDF.
     """
     import ezdxf
     doc = ezdxf.new("R2018", setup=True)
@@ -58,11 +58,13 @@ def ecrire_dxf(chemin, plans, cadastre=None):
                 for (x, y), txt, h in items:
                     msp.add_text(txt, height=h, rotation=angle, dxfattribs={"layer": lay, "insert": (x, y)})
             else:
-                for pts, ferme in items:
-                    if len(pts) == 2:
+                for it in items:
+                    pts, ferme = it[0], it[1]
+                    largeur = it[2] if len(it) > 2 else 0.0
+                    if len(pts) == 2 and not largeur:
                         msp.add_line(pts[0], pts[1], dxfattribs={"layer": lay})
                     elif len(pts) >= 2:
-                        msp.add_lwpolyline(pts, close=bool(ferme), dxfattribs={"layer": lay})
+                        msp.add_lwpolyline(pts, close=bool(ferme), dxfattribs={"layer": lay, "const_width": round(largeur, 4)})
     doc.saveas(chemin)
     return chemin
 

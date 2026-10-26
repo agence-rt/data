@@ -74,6 +74,31 @@ class Lecture(unittest.TestCase):
                 plans.lire_pdf(f)
 
 
+class Scan(unittest.TestCase):
+    def test_murs_epais_et_traits_fins_du_scan(self):
+        """Un trait épais devient un mur (avec sa largeur), un trait fin un trait ; le cadre de la feuille est ignoré."""
+        import numpy as np
+        with tempfile.TemporaryDirectory() as d:
+            im = np.full((2480, 3508), 255, np.uint8)            # A4 paysage à 300 dpi
+            im[1000:1010, 600:2600] = 0                          # trait épais ~0,85 mm, 169 mm de long
+            im[1300:1302, 600:2600] = 0                          # trait fin ~0,17 mm
+            im[20:22, 100:3400] = 0                              # cadre de la feuille, à ignorer
+            f = os.path.join(d, "s.pdf")
+            Image.fromarray(im).save(f, resolution=300)
+            pl = plans.lire_pdf(f)
+            roles = sorted(t.role for t in pl.traces)
+            self.assertEqual(roles, ["mur", "trait"])
+            mur = next(t for t in pl.traces if t.role == "mur")
+            self.assertAlmostEqual(mur.largeur_mm, 0.85, delta=0.2)
+            cal = plans.classer(pl, 50)
+            self.assertEqual(len(cal["MURS"]), 1)
+            self.assertAlmostEqual(cal["MURS"][0][2], 0.85 * 50 / 1000, delta=0.01)   # largeur en mètres réels
+
+    def test_seuil_epaisseur(self):
+        self.assertAlmostEqual(plans._seuil_epaisseur([0.15] * 30 + [0.6] * 30), 0.4, delta=0.25)
+        self.assertEqual(plans._seuil_epaisseur([0.2] * 10), 0.33)
+
+
 class Recalage(unittest.TestCase):
     def test_rotation_et_dimensions_retrouvees(self):
         with tempfile.TemporaryDirectory() as d:

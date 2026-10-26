@@ -446,7 +446,7 @@ def selftest():
     log = []
     ok = True
     for nom, fn in (("pyproj", _t_pyproj), ("shapely", _t_shapely), ("laspy+lazrs", _t_laspy),
-                    ("matplotlib", _t_mpl), ("plans PDF (pdfplumber, opencv, ezdxf)", _t_plans), ("tkinter", _t_tk),
+                    ("matplotlib", _t_mpl), ("plans PDF (pdfplumber, opencv, skimage, ezdxf)", _t_plans), ("tkinter", _t_tk),
                     ("geo/pipeline", _t_modules)):
         try:
             fn()
@@ -532,7 +532,7 @@ def _t_plans():
     pv = plans.lire_pdf(v)
     assert not pv.scanne and pv.echelle == 100, (pv.scanne, pv.echelle)
     ps = plans.lire_pdf(os.path.join(d, "s.pdf"))
-    assert ps.scanne and len(ps.traces) > 3
+    assert ps.scanne and len(ps.traces) > 3 and any(t.role == "mur" for t in ps.traces), "squelette des scans"
     cal = plans.classer(pv, 100)
     assert cal["MURS"] and cal["TRAITS"]
     dwg.ecrire_dxf(os.path.join(d, "t.dxf"), [("TEST", cal, 0.0)])

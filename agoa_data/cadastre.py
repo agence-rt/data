@@ -147,7 +147,8 @@ def apercu(chemin_png, plans_places, contexte):
     for i, (nom, calques, _) in enumerate(plans_places):
         c = couleurs[i % len(couleurs)]
         for typ, lw in (("TRAITS", 0.3), ("MURS", 0.9)):
-            for pts, ferme in calques.get(typ, []):
+            for it in calques.get(typ, []):
+                pts, ferme = it[0], it[1]
                 a = np.array(pts + ([pts[0]] if ferme else []))
                 ax.plot(a[:, 0], a[:, 1], color=c, lw=lw, alpha=0.9 if typ == "MURS" else 0.6)
                 if not contexte:

@@ -4,6 +4,6 @@ py -m pip install --upgrade pip
 py -m pip install -r requirements.txt pyinstaller
 py -m unittest discover -s tests
 if errorlevel 1 goto fin
-py -m PyInstaller --noconsole --onefile --icon icon.ico --add-data "icon.ico;." --collect-submodules laspy --hidden-import lazrs --collect-data pyproj --collect-all pdfplumber --collect-all pdfminer --collect-all pypdfium2 --collect-all ezdxf --name "AGOA DATA" agoa_app.py
+py -m PyInstaller --noconsole --onefile --icon icon.ico --add-data "icon.ico;." --collect-submodules laspy --hidden-import lazrs --collect-data pyproj --collect-all pdfplumber --collect-all pdfminer --collect-all pypdfium2 --collect-all ezdxf --collect-all skimage --collect-all lazy_loader --name "AGOA DATA" agoa_app.py
 :fin
 pause

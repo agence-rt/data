@@ -19,7 +19,7 @@ from shapely.ops import unary_union
 PT_MM = 25.4 / 72
 ECHELLES_USUELLES = (20, 25, 50, 100, 200, 250, 500)
 EPAISSEUR_MURS_MM = 0.30                 # sur le papier : au-delà, le trait est un mur
-MAX_PX = 5200                            # taille maximale de l'image pour un plan scanné
+MAX_PX = 12000                           # taille maximale de l'image pour un plan scanné
 
 
 class PlanError(Exception):
@@ -32,6 +32,7 @@ class Trace:
     largeur_mm: float = 0.0
     ferme: bool = False
     rempli: bool = False
+    role: str = ""                       # scans : "mur", "trait" ou "cote" (déterminé par la vectorisation)
 
 
 @dataclass
@@ -139,71 +140,178 @@ def _lire_vecteurs(p, plan):
 
 
 def _lire_scan(chemin, page, plan, mots):
-    """Plan scanné : rendu en image, séparation traits épais (murs) / traits fins, vectorisation."""
+    """Plan scanné : binarisation, nettoyage des bords de feuille, squelette des traits, vectorisation en polylignes.
+
+    Chaque trait est réduit à son axe (squelette) et garde son épaisseur mesurée : les traits épais deviennent des MURS (polyligne
+    avec largeur), les traits fins des TRAITS, les petits tracés (écriture à la main, flèches, tirets de cote) des COTES.
+    """
     import cv2
     import pypdfium2 as pdfium
     pdf = pdfium.PdfDocument(chemin)
     pg = pdf[min(page, len(pdf) - 1)]
     w_pt, h_pt = pg.get_size()
-    k = min(200 / 72, MAX_PX / max(w_pt, h_pt))          # 200 dpi, plafonné
+    k = min(300 / 72, MAX_PX / max(w_pt, h_pt))          # 300 dpi, plafonné
     img = np.array(pg.render(scale=k).to_pil().convert("L"))
+    pdf.close()
     if img.size == 0 or img.std() < 3:
         raise PlanError(f"{plan.nom} : page vide ou sans dessin lisible.")
-    _, noir = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
+    H, W = img.shape
     mm_px = 25.4 / (72 * k)                              # millimètres de papier par pixel
-    H = img.shape[0]
-    seuil = max(3, int(round(EPAISSEUR_MURS_MM / mm_px)))
-    epais = cv2.morphologyEx(noir, cv2.MORPH_OPEN, np.ones((seuil, seuil), np.uint8))
-    epais = cv2.dilate(epais, np.ones((3, 3), np.uint8))
-    clair = (img < 215).astype(np.uint8) * 255                    # traits fins / pâles de la numérisation
-    fins = cv2.bitwise_and(clair, cv2.bitwise_not(cv2.dilate(epais, np.ones((3, 3), np.uint8))))
+    seuil_binaire, _ = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+    noir = (img < min(seuil_binaire + 20, 170)).astype(np.uint8)
+    del img
+    noir = _nettoyer_bords(noir)
+    polylignes = _squelette_polylignes(noir, mm_px)
+    del noir
 
-    contours, _ = cv2.findContours(epais, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    for c in contours:
-        if cv2.contourArea(c) * mm_px ** 2 < 0.2:               # < 0,2 mm² sur le papier : poussière
+    largeurs = [e for _, e, lg in polylignes if lg >= 8.0]            # épaisseurs des tracés longs (mm)
+    seuil = _seuil_epaisseur(largeurs)
+    bx, by = 0.035 * W, 0.035 * H                         # cadre de la feuille : bande de 3,5 % le long des bords
+    for pts, epais, longueur in polylignes:
+        if longueur < 0.8:
             continue
-        a = cv2.approxPolyDP(c, 0.8, True).reshape(-1, 2)
-        if len(a) >= 3:
-            plan.traces.append(Trace([(float(px) * mm_px, (H - float(py)) * mm_px) for px, py in a], 0.0, True, True))
-
-    seg = _segments(fins, mm_px)
-    for x0, y0, x1, y1 in seg:
-        if math.hypot(x1 - x0, y1 - y0) * mm_px >= 1.0:          # ≥ 1 mm sur le papier
-            plan.traces.append(Trace([(x0 * mm_px, (H - y0) * mm_px), (x1 * mm_px, (H - y1) * mm_px)], 0.1))
-    pdf.close()
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        if max(xs) < bx or min(xs) > W - bx or max(ys) < by or min(ys) > H - by:
+            continue
+        if longueur < 4.0:
+            role = "cote"                                  # tirets de cote, pointes de flèche, bouts d'écriture
+        elif epais >= seuil:
+            role = "mur" if longueur >= 12.0 else "cote"   # chiffres écrits en gras : épais mais courts
+        else:
+            role = "trait"
+        plan.traces.append(Trace([(x * mm_px, (H - y) * mm_px) for x, y in pts], epais, False, False, role))
     plan.scanne = True
-    if len(plan.traces) < 5:
+    if not plan.traces:
         raise PlanError(f"{plan.nom} : aucun trait exploitable dans ce PDF.")
     return plan
 
 
-def _segments(masque, mm_px):
-    """Segments (pixels) d'un masque de traits fins : détecteur LSD, à défaut transformée de Hough."""
+def _seuil_epaisseur(largeurs):
+    """Épaisseur (mm) séparant traits fins et traits épais : coupure d'Otsu si les deux familles sont nettes, sinon 0,33 mm."""
+    if len(largeurs) < 20:
+        return 0.33
+    v = np.sort(np.asarray(largeurs))
+    meilleur, seuil = -1.0, 0.33
+    for t in np.quantile(v, np.linspace(0.1, 0.9, 33)):
+        bas, haut = v[v < t], v[v >= t]
+        if len(bas) < 5 or len(haut) < 5:
+            continue
+        var = len(bas) * len(haut) * (haut.mean() - bas.mean()) ** 2
+        if var > meilleur:
+            meilleur, seuil, rapport = var, float(t), haut.mean() / max(bas.mean(), 1e-6)
+    return min(max(seuil, 0.25), 0.8) if meilleur > 0 and rapport >= 1.6 else 0.33
+
+
+def _nettoyer_bords(noir):
+    """Supprime les poussières, les composantes qui touchent le bord de la feuille (cadre, bandes noires, déchirures)."""
     import cv2
-    out = []
-    try:
-        lsd = cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD)
-        res = lsd.detect(255 - masque)[0]
-        if res is not None:
-            out = [tuple(map(float, s)) for s in np.asarray(res).reshape(-1, 4)]
-    except Exception:                                    # noqa: BLE001
-        out = []
-    if not out:
-        res = cv2.HoughLinesP(masque, 1, np.pi / 180, threshold=25, minLineLength=int(2 / mm_px), maxLineGap=3)
-        if res is not None:
-            out = [tuple(map(float, s)) for s in np.asarray(res).reshape(-1, 4)]
-    return out
+    H, W = noir.shape
+    n, lab, st, _ = cv2.connectedComponentsWithStats(noir, connectivity=8)
+    bx, by = int(0.012 * W), int(0.012 * H)
+    x, y, w, h, aire = st[:, 0], st[:, 1], st[:, 2], st[:, 3], st[:, 4]
+    touche = (x <= bx) | (y <= by) | (x + w >= W - bx) | (y + h >= H - by)
+    mauvais = touche | (aire < 6)
+    mauvais[0] = False                                   # fond
+    noir[mauvais[lab]] = 0
+    return noir
+
+
+def _squelette_polylignes(noir, mm_px):
+    """Masque binaire → [(points pixels simplifiés, épaisseur mm, longueur mm)]."""
+    import cv2
+    from skimage.morphology import skeletonize
+    dt = cv2.distanceTransform(noir, cv2.DIST_L2, 3)
+    sk = skeletonize(noir.astype(bool))
+    ys, xs = np.nonzero(sk)
+    N = len(ys)
+    if N == 0:
+        return []
+    W = noir.shape[1]
+    cle = ys.astype(np.int64) * W + xs
+    ordre = np.argsort(cle)
+    cle_tri = cle[ordre]
+    # voisins dans l'ordre cyclique autour du pixel
+    decal = [(-1, -1), (-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1)]
+    adj = np.full((N, 8), -1, dtype=np.int32)
+    for j, (dy, dx) in enumerate(decal):
+        c = (ys + dy).astype(np.int64) * W + (xs + dx)
+        pos = np.searchsorted(cle_tri, c)
+        pos[pos >= N] = N - 1
+        ok = cle_tri[pos] == c
+        ok &= (xs + dx >= 0) & (xs + dx < W)
+        adj[ok, j] = ordre[pos[ok]]
+    pres = adj >= 0
+    cn = ((~pres) & np.roll(pres, -1, axis=1)).sum(axis=1)       # nombre de branches autour du pixel
+    cn = np.where(pres.all(axis=1), 0, cn)
+    noeud = (cn != 2)
+    demi = dt[ys, xs]                                             # demi-épaisseur en pixels
+    voisins = [[int(v) for v in row if v >= 0] for row in adj]
+    visite = bytearray(N)
+    chemins = []
+
+    def suivre(debut, premier):
+        chemin, prev, cur = [debut, premier], debut, premier
+        while not noeud[cur]:
+            visite[cur] = 1
+            vp = set(voisins[prev])
+            suite = [v for v in voisins[cur] if v != prev and v not in vp]
+            for v in voisins[cur]:                                # coins en escalier : pixels redondants
+                if v != prev and v in vp and not noeud[v]:
+                    visite[v] = 1
+            if not suite:
+                suite = [v for v in voisins[cur] if v != prev and not visite[v]]
+            if not suite:
+                break
+            prev, cur = cur, suite[0]
+            chemin.append(cur)
+            if visite[cur]:
+                break
+        return chemin
+
+    for n in np.nonzero(noeud)[0]:
+        for m in voisins[n]:
+            if noeud[m]:
+                if n < m:
+                    chemins.append([int(n), m])
+            elif not visite[m]:
+                chemins.append(suivre(int(n), m))
+    for n in np.nonzero(~noeud)[0]:                               # boucles fermées (cercles de numérotation…)
+        if not visite[n]:
+            visite[n] = 1
+            nb = voisins[n]
+            if nb:
+                c = suivre(int(n), nb[0])
+                chemins.append(c)
+    sortie = []
+    for c in chemins:
+        pts = np.stack([xs[c], ys[c]], axis=1).astype(np.float32)
+        if len(pts) >= 3:
+            pts = cv2.approxPolyDP(pts.reshape(-1, 1, 2), 1.6, False).reshape(-1, 2)
+        longueur = float(np.sum(np.hypot(*np.diff(pts, axis=0).T))) * mm_px if len(pts) > 1 else 0.0
+        epais = float(np.median(2 * demi[c])) * mm_px
+        sortie.append(([(float(x), float(y)) for x, y in pts], epais, longueur))
+    return sortie
 
 
 # ---------------------------------------------------------------------------------------- mise à l'échelle
 def classer(plan, echelle):
-    """PlanPDF + échelle (1/x) → dict calque → liste de polylignes en mètres (repère local, y vers le haut) et textes."""
+    """PlanPDF + échelle (1/x) → dict calque → listes, en mètres (repère local, y vers le haut).
+
+    Calques de polylignes : MURS (pts, fermé, largeur m), TRAITS, COTES (petits tracés des scans : tirets de cote, chiffres écrits à
+    la main) ; calques de textes (PDF vectoriels) : TEXTES_COTES et TEXTES.
+    """
     m = echelle / 1000.0                                 # mm papier → m terrain
-    largeurs = [t.largeur_mm for t in plan.traces if t.largeur_mm > 0 and not t.rempli]
-    seuil = max(EPAISSEUR_MURS_MM, 1.8 * float(np.percentile(largeurs, 20))) if largeurs and not plan.scanne else EPAISSEUR_MURS_MM
-    calques = {"MURS": [], "TRAITS": [], "TEXTES_COTES": [], "TEXTES": []}
+    largeurs = [t.largeur_mm for t in plan.traces if t.largeur_mm > 0 and not t.rempli and not t.role]
+    seuil = max(EPAISSEUR_MURS_MM, 1.8 * float(np.percentile(largeurs, 20))) if largeurs else EPAISSEUR_MURS_MM
+    calques = {"MURS": [], "TRAITS": [], "COTES": [], "TEXTES_COTES": [], "TEXTES": []}
     for t in plan.traces:
         pts = [(x * m, y * m) for x, y in t.pts]
+        if t.role:                                       # plan scanné
+            if t.role == "mur":
+                calques["MURS"].append((pts, t.ferme, t.largeur_mm * m))
+            else:
+                calques["COTES" if t.role == "cote" else "TRAITS"].append((pts, t.ferme))
+            continue
         mur = t.rempli or t.largeur_mm >= seuil
         calques["MURS" if mur else "TRAITS"].append((pts, t.ferme))
     for tx in plan.textes:
@@ -249,13 +357,32 @@ def _points_principaux(lignes):
     """Points des grands tracés seulement (≥ 25 % de la plus grande étendue) : les lettres et les petits objets n'entrent pas
     dans l'emprise comparée au cadastre."""
     etendues = []
-    for ligne, _ in lignes:
+    for it in lignes:
+        ligne = it[0]
         xs, ys = [p[0] for p in ligne], [p[1] for p in ligne]
         etendues.append(math.hypot(max(xs) - min(xs), max(ys) - min(ys)) if ligne else 0.0)
     if not etendues:
         return []
     seuil = 0.25 * max(etendues)
-    return [p for (ligne, _), e in zip(lignes, etendues) if e >= seuil for p in ligne]
+    return [p for it, e in zip(lignes, etendues) if e >= seuil for p in it[0]]
+
+
+def _direction_dominante(segments):
+    """Direction dominante (degrés, modulo 90) d'un ensemble de segments ((x0, y0), (x1, y1)), pondérée par la longueur ;
+    renvoie (angle, concentration 0..1). Les bâtiments parisiens ont surtout des murs orthogonaux."""
+    z, tot = 0j, 0.0
+    for (x0, y0), (x1, y1) in segments:
+        L = math.hypot(x1 - x0, y1 - y0)
+        if L > 0:
+            z += L * complex(math.cos(4 * math.atan2(y1 - y0, x1 - x0)), math.sin(4 * math.atan2(y1 - y0, x1 - x0)))
+            tot += L
+    if tot == 0:
+        return 0.0, 0.0
+    return (math.degrees(math.atan2(z.imag, z.real)) / 4) % 90, abs(z) / tot
+
+
+def _segments_de(lignes):
+    return [(l[i], l[i + 1]) for it in lignes for l in [it[0]] for i in range(len(l) - 1)]
 
 
 def recaler(calques, cible):
@@ -263,7 +390,7 @@ def recaler(calques, cible):
 
     L'enveloppe convexe des murs du plan est comparée à celle de l'emprise (bâtiment BD TOPO / parcelle) pour les quatre
     orientations possibles ; on retient la meilleure (rapport d'intersection / réunion). La dimension n'est corrigée que si le
-    recouvrement est bon et si l'écart d'échelle reste raisonnable (±15 %).
+    recouvrement est bon et si l'écart d'échelle reste faible (±6 %, la dérive d'une photocopie ou d'un scan).
     """
     pts = _points_principaux(calques["MURS"]) or _points_principaux(calques["TRAITS"])
     if len(pts) < 3:
@@ -278,7 +405,7 @@ def recaler(calques, cible):
     ch = cible.convex_hull
     cc = (ch.centroid.x, ch.centroid.y)
     s_aire = math.sqrt(ch.area / hull.area)
-    echelles = [1.0] + ([s_aire] if abs(s_aire - 1) <= 0.15 else [])
+    echelles = [1.0] + ([s_aire] if abs(s_aire - 1) <= 0.06 else [])
 
     def iou_de(ang, s):
         h = Polygon(_transformee(hull.exterior.coords, ang, s, r.centre_plan, cc))
@@ -295,10 +422,26 @@ def recaler(calques, cible):
                 if v > meilleur[0]:
                     meilleur = (v, a, s)
     iou_best, ang, s_best = meilleur
+    # affinage par les murs : leur direction dominante doit épouser celle des façades de l'emprise cadastrale
+    dp, cp = _direction_dominante(_segments_de(calques["MURS"] or calques["TRAITS"]))
+    polys = list(cible.geoms) if cible.geom_type == "MultiPolygon" else [cible]
+    dc, cc_ = _direction_dominante([(a, b) for p in polys for a, b in zip(list(p.exterior.coords)[:-1], list(p.exterior.coords)[1:])])
+    if cp >= 0.35 and cc_ >= 0.35:
+        voulu = (dc - dp) % 90
+        k_ = round((ang - voulu) / 90)
+        ang2 = (voulu + 90 * k_) % 360
+        ecart = abs((ang2 - ang + 180) % 360 - 180)
+        if 0.3 < ecart <= 12:
+            r.avertissements.append(f"Rotation affinée de {ecart:.1f}° d'après la direction des murs.")
+            ang = ang2
+            iou_best = iou_de(ang, s_best)
     r.angle_deg, r.echelle, r.iou = ang, 1.0, iou_de(ang, 1.0)
     if s_best != 1.0 and iou_best >= 0.6 and iou_best >= r.iou + 0.03:
         r.echelle, r.iou = s_best, iou_best
         r.avertissements.append(f"Dimensions corrigées de {100 * (s_best - 1):+.1f} % pour coller à l'emprise cadastrale.")
+    if abs(s_aire - 1) > 0.06:
+        r.avertissements.append(f"Écart de {100 * (s_aire - 1):+.0f} % entre l'emprise du plan et celle du cadastre, non corrigé : "
+                                "plan partiel ou échelle différente ? Vérifiez l'échelle indiquée.")
     r.tx, r.ty = ch.centroid.x, ch.centroid.y
     r.fiable = r.iou >= 0.6
     if not r.fiable:
@@ -314,5 +457,6 @@ def appliquer(calques, rec):
         if nom.startswith("TEXTES"):
             out[nom] = [(rec.point(*pos), txt, h * rec.echelle) for pos, txt, h in items]
         else:
-            out[nom] = [([rec.point(x, y) for x, y in ligne], ferme) for ligne, ferme in items]
+            out[nom] = [([rec.point(x, y) for x, y in it[0]], it[1], *([it[2] * rec.echelle] if len(it) > 2 else []))
+                        for it in items]
     return out

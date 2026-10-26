@@ -16,7 +16,9 @@ Saisir une adresse (suggestions pendant la frappe), choisir le dossier **ENREGIS
 3. **PLANS DWG (depuis PDF)** — fond de plan DWG à partir de plans PDF que vous possédez :
    - choisir un ou plusieurs PDF (plans vectoriels ou **scannés**) ; l'échelle est lue dans le PDF (« 1/50 », « Échelle 1:100 »), sinon elle est demandée
      (toujours pour un scan) ;
-   - le logiciel sépare les murs (traits épais et poché), les traits fins, et pour un PDF vectoriel les textes et valeurs de cotes ;
+   - le logiciel sépare les murs (traits épais et poché), les traits fins et, pour un PDF vectoriel, les textes et valeurs de cotes ; pour un
+     **scan** (300 dpi), les traits sont réduits à leur axe (squelette) : murs = polylignes avec leur épaisseur réelle, traits fins (lignes de cote…),
+     et calque `COTES` pour les petits tracés (tirets, flèches, chiffres écrits à la main) ; cadre de la feuille et taches de scan sont écartés ;
    - le plan est **recalé sur le cadastre** : rotation, translation et, si l'écart reste raisonnable (±15 %) et le recouvrement bon, correction des
      dimensions, par comparaison de l'emprise des murs avec le bâtiment BD TOPO / la parcelle ; un aperçu `apercu_recalage_*.png` permet de contrôler ;
    - livrable : `fond_de_plan_<NOM>.dxf` (calques `CADASTRE_*` et `<PLAN>_MURS`, `_TRAITS`, `_TEXTES_COTES`, `_TEXTES`, mètres, Lambert 93) puis
