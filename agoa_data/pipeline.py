@@ -4,6 +4,7 @@ import os
 import re
 import unicodedata
 
+from . import APP_VERSION
 from . import cadastre, dwg, export, facade_photos, facades, geo, lidar, mosaique, plans, volumetrie
 from . import coupes as cp
 
@@ -106,12 +107,27 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
         ph = None
         if niveaux_visibles:
             facades.definir_niveaux(f, niveaux_visibles)
+        asm = None
         if avec_photos and "abscisses" in f.r and facade_seule:
-            try:                                   # étape 1 : assemblage des vues de rue (RDC + 2 étages)
-                _, dm = mosaique.ecrire(f, os.path.join(dfac, f"assemblage_{i}"), z_haut=(f.h_rdc if hasattr(f, "h_rdc") else 3.0) + 2 * 2.8 + 0.6, say=say)
-                say(f"Assemblage : {dm['taille_px'][0]}x{dm['taille_px'][1]} px, couverture {int(dm['couverture']*100)} %")
+            import traceback
+            os.makedirs(dfac, exist_ok=True)
+            jr = os.path.join(dfac, f"assemblage_{i}_journal.txt")
+            lignes = [f"AGOA DATA {APP_VERSION} - assemblage facade {i} ({f.voie})"]
+
+            def dire(m, _l=lignes):
+                _l.append(str(m))
+                say(m)
+            try:                                   # etape 1 : assemblage des vues de rue (RDC + 2 etages)
+                hz = (f.r.get("h_rdc") or 3.0) + 2 * 2.8 + 0.6
+                _, dm = mosaique.ecrire(f, os.path.join(dfac, f"assemblage_{i}"), z_haut=hz, say=dire)
+                dire(f"Assemblage : {dm['taille_px'][0]}x{dm['taille_px'][1]} px, couverture {int(dm['couverture']*100)} %")
+                asm = {"dossier": f"assemblage_{i}", "fichier": f"assemblage_{i}/assemblage.jpg", "couverture": dm["couverture"]}
             except Exception as ex:
-                say(f"⚠ Assemblage Panoramax impossible : {ex}")
+                dire(f"Assemblage Panoramax impossible : {ex}")
+                lignes.append(traceback.format_exc())
+                asm = {"erreur": str(ex)}
+            with open(jr, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(lignes))
         elif avec_photos and "abscisses" in f.r:
             ph = facade_photos.traiter(f, i, dfac, say=say, photos_dir=photos_dir, n_visibles=niveaux_visibles)
             for w in ph["avertissements"]:
@@ -121,6 +137,9 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
         info = {**facades.resume(f), "fichier": fn}
         if ph is not None:
             info["photos"] = ph
+        if asm is not None:
+            info["assemblage"] = asm
+        info["version"] = APP_VERSION
         fac_res.append(info)
     if fac:
         facades.ecrire_facades_dxf(fac, os.path.join(dfac, "facades.dxf"))
