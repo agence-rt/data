@@ -55,7 +55,18 @@ def choisir_par_pas(cands, f, pas=3.0, d_min=3.0, d_max=22.0, tol=6.0):
 def _bbox_candidats(f, marge=25.0, limite=200):
     cx = f.origine[0] + f.droite[0] * f.longueur / 2 + f.sortant[0] * 8
     cy = f.origine[1] + f.droite[1] * f.longueur / 2 + f.sortant[1] * 8
-    return panoramax.chercher(cx, cy, distance=(1, f.longueur / 2 + marge), limite=limite)
+    derniere = None
+    for dist, lim in (((1, int(math.ceil(f.longueur / 2 + marge))), limite), ((2, 40), 100), ((4, 45), 80), ((4, 30), 50)):
+        try:
+            r = panoramax.chercher(cx, cy, distance=dist, limite=lim)
+            if r:
+                return r
+        except Exception as ex:                  # requête refusée : on retente avec des paramètres plus simples
+            derniere = ex
+    if derniere:
+        raise derniere
+    return []
+
 
 
 def _vue_metrique(p, pano, f, t, d, ech, z_haut, taille=(1400, 1400), fov=100.0):

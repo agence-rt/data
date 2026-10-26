@@ -53,7 +53,7 @@ def chercher(x, y, distance=(4, 45), limite=80, instances=INSTANCES):
     for inst in instances:
         try:
             d = geo.get_json(f"{inst}/search", {"place_position": f"{lon:.6f},{lat:.6f}",
-                                                 "place_distance": f"{distance[0]}-{distance[1]}", "limit": limite}, timeout=40, retries=2)
+                                                 "place_distance": f"{int(round(distance[0]))}-{int(math.ceil(distance[1]))}", "limit": limite}, timeout=40, retries=2)
         except geo.DataError as e:
             derniere = e
             continue
