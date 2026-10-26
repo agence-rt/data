@@ -239,7 +239,7 @@ def ecrire_facades_dxf(facades, chemin, ecart=12.0):
         if "abscisses" not in r:
             continue
         base = f"F{i}_{nom_calque(f.voie)}"
-        for k, c in (("SOL", 8), ("FACADE", 7), ("TOITURE", 1), ("NIVEAUX", 4), ("COTES", 3), ("TEXTES", 7)):
+        for k, c in (("SOL", 8), ("FACADE", 7), ("TOITURE", 1), ("NIVEAUX", 4), ("COTES", 3), ("TEXTES", 7), ("BAIES", 5), ("BALCONS", 6)):
             doc.layers.add(f"{base}_{k}", color=c)
         T, sol = r["abscisses"], r["sol"]
         ext = np.concatenate([[-2.0], T, [f.longueur + 2.0]])
@@ -256,6 +256,10 @@ def ecrire_facades_dxf(facades, chemin, ecart=12.0):
         for k, z in enumerate(r.get("niveaux", []), 1):
             msp.add_line((x0, float(z)), (x0 + f.longueur, float(z)), dxfattribs={"layer": f"{base}_NIVEAUX", "linetype": "DASHED"})
             msp.add_text(f"R+{k} (estime) {z:.2f} NGF", height=0.3, dxfattribs={"layer": f"{base}_TEXTES", "insert": (x0 + f.longueur + 0.5, float(z))})
+        for o in r.get("ouvertures", []):
+            x, w_, zb, hh = x0 + o["x"], o["largeur"], o["z_bas"], o["hauteur"]
+            msp.add_lwpolyline([(x, zb), (x + w_, zb), (x + w_, zb + hh), (x, zb + hh)], close=True,
+                               dxfattribs={"layer": f"{base}_BALCONS" if o["type"] == "balcon" else f"{base}_BAIES"})
         yb = float(sol.min()) - 2.0
         try:                                                           # cote de longueur (vraie entité de cote)
             d = msp.add_linear_dim(base=(x0, yb), p1=(x0, yb + 1.0), p2=(x0 + f.longueur, yb + 1.0),
@@ -273,7 +277,7 @@ def ecrire_facades_dxf(facades, chemin, ecart=12.0):
             titre += f" (front de parcelle {f.front_parcelle:.1f} m)"
         msp.add_text(titre, height=0.6, dxfattribs={"layer": f"{base}_TEXTES",
                                                     "insert": (x0, float(max(r.get("faitage", 0), r.get("egout_med", 0))) + 2.5)})
-        msp.add_text("Niveau 1 : enveloppe et niveaux estimes, sans ouvertures", height=0.3,
+        msp.add_text("Niveau 2 : ouvertures detectees sur photos (a valider)" if r.get("ouvertures") else "Niveau 1 : enveloppe et niveaux estimes, sans ouvertures", height=0.3,
                      dxfattribs={"layer": f"{base}_TEXTES", "insert": (x0, float(max(r.get("faitage", 0), r.get("egout_med", 0))) + 1.8)})
         x0 += f.longueur + ecart + 14.0
     doc.saveas(chemin)

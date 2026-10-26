@@ -4,7 +4,7 @@ import os
 import re
 import unicodedata
 
-from . import cadastre, dwg, export, facades, geo, lidar, plans, volumetrie
+from . import cadastre, dwg, export, facade_photos, facades, geo, lidar, plans, volumetrie
 from . import coupes as cp
 
 TYPES_VOIE = {"rue", "avenue", "av", "boulevard", "bd", "place", "pl", "passage", "impasse", "villa", "allee",
@@ -31,11 +31,12 @@ def _dossier(adr, dossier_sortie, sous, nom=None):
     return d
 
 
-def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facade_seule=False):
+def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facade_seule=False, photos_dir=None, avec_photos=True):
     """Exécute toute la chaîne et écrit les livrables dans `dossier_sortie/<NOM>/`. Retourne un dict de résultats.
 
     `adresse` : texte libre ou `geo.Adresse` (déjà choisie dans les suggestions).
     `facade_seule` : ne produit que le dessin des façades sur rue (dossier `facade`), sans les livrables de volumétrie.
+    `photos_dir` : dossier de photos de façade (facultatif) ; `avec_photos` : élévation photographique (Panoramax + vos photos) et ouvertures.
     """
     say = progress or (lambda s: None)
     say("Recherche de l'adresse…")
@@ -103,7 +104,13 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
         fn = f"facade_{i}_{re.sub(r'[^A-Za-z0-9]+', '_', f.voie)}.png"
         if "abscisses" in f.r:
             facades.tracer_facade(f, os.path.join(dfac, fn))
-        fac_res.append({**facades.resume(f), "fichier": fn})
+        info = {**facades.resume(f), "fichier": fn}
+        if avec_photos and "abscisses" in f.r:
+            ph = facade_photos.traiter(f, i, dfac, say=say, photos_dir=photos_dir)
+            info["photos"] = ph
+            for w in ph["avertissements"]:
+                say("⚠ " + w)
+        fac_res.append(info)
     if fac:
         facades.ecrire_facades_dxf(fac, os.path.join(dfac, "facades.dxf"))
     if facade_seule:

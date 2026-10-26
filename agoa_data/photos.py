@@ -90,3 +90,121 @@ def redresser_complet(img):
     a, i1 = redresser(img)
     t, i2 = redresser(cv2.transpose(a))
     return cv2.transpose(t), {"verticales": i1, "horizontales": i2}
+
+
+# --------------------------------------------------------------------------------------------
+# Projection d'une photo à pose connue (Panoramax) sur le plan de la façade → élévation à l'échelle
+def _grille(f, z_min, z_max, ech):
+    W = max(1, int(math.ceil(f.longueur * ech)))
+    H = max(1, int(math.ceil((z_max - z_min) * ech)))
+    t = (np.arange(W) + 0.5) / ech
+    z = z_max - (np.arange(H) + 0.5) / ech
+    T, Z = np.meshgrid(t, z)
+    X = f.origine[0] + T * f.droite[0]
+    Y = f.origine[1] + T * f.droite[1]
+    return X, Y, Z, W, H
+
+
+def tangage_et_focale(img, fov=None):
+    """(tangage °, focale px) d'une photo plate : focale d'après le champ de vision (défaut : équivalent 26 mm), tangage d'après
+    le point de fuite vertical (appareil levé > 0)."""
+    h, w = img.shape[:2]
+    f = (max(w, h) / 2) / math.tan(math.radians(fov) / 2) if fov else 26.0 / 36.0 * max(w, h)
+    gris = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    k = 1600 / max(h, w)
+    petit = cv2.resize(gris, None, fx=k, fy=k) if k < 1 else gris
+    segs = _segments(petit, 40) / (k if k < 1 else 1.0)
+    vp, conf = point_de_fuite_vertical(segs, w, h)
+    if vp is None or conf < 0.6:
+        return 0.0, f
+    dy = h / 2 - vp[1]
+    tg = math.degrees(math.atan2(f, dy)) if dy > 0 else 0.0
+    return float(np.clip(tg, -5, 60)), f
+
+
+def projeter(img, photo, f, z_min, z_max, ech=50.0, hauteur_appareil=2.3, sol=0.0):
+    """Élévation (BGR) de la façade vue par `photo` : lignes = altitudes z_max → z_min, colonnes = abscisse 0 → longueur, `ech` px/m.
+    Renvoie (élévation, masque des pixels renseignés, méta)."""
+    X, Y, Z, W, H = _grille(f, z_min, z_max, ech)
+    dx, dy, dz = X - photo.x, Y - photo.y, Z - (sol + hauteur_appareil)
+    ih, iw = img.shape[:2]
+    cap_facade = math.degrees(math.atan2(f.origine[0] + f.droite[0] * f.longueur / 2 - photo.x,
+                                         f.origine[1] + f.droite[1] * f.longueur / 2 - photo.y)) % 360
+    meta = {"equirect": photo.equirect}
+    graz = -(dx * f.sortant[0] + dy * f.sortant[1]) / (np.sqrt(dx * dx + dy * dy + dz * dz) + 1e-9)      # cosinus d'incidence
+    if photo.equirect:
+        az = photo.azimut if photo.azimut is not None else 0.0
+        brg = np.degrees(np.arctan2(dx, dy))
+        lat = np.degrees(np.arctan2(dz, np.hypot(dx, dy)))
+        mx = (((brg - az) / 360.0 + 0.5) % 1.0) * iw
+        my = (0.5 - lat / 180.0) * ih
+        ok = graz > 0.2
+    else:
+        yaw = math.radians(photo.azimut if photo.azimut is not None else cap_facade)
+        tang, foc = tangage_et_focale(img, photo.fov)
+        th = math.radians(tang)
+        fwd = np.array([math.cos(th) * math.sin(yaw), math.cos(th) * math.cos(yaw), math.sin(th)])
+        right = np.array([math.cos(yaw), -math.sin(yaw), 0.0])
+        up = np.array([-math.sin(th) * math.sin(yaw), -math.sin(th) * math.cos(yaw), math.cos(th)])
+        zc = dx * fwd[0] + dy * fwd[1] + dz * fwd[2]
+        xc = dx * right[0] + dy * right[1]
+        yc = dx * up[0] + dy * up[1] + dz * up[2]
+        zc_s = np.where(zc > 0.5, zc, 1.0)
+        mx = iw / 2 + foc * xc / zc_s
+        my = ih / 2 - foc * yc / zc_s
+        ok = (zc > 0.5) & (mx >= 0) & (mx < iw) & (my >= 0) & (my < ih) & (graz > 0.2)
+        meta.update(tangage=tang, focale=foc)
+    out = cv2.remap(img, mx.astype(np.float32), my.astype(np.float32), cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_WRAP if photo.equirect else cv2.BORDER_CONSTANT)
+    out[~ok] = 255
+    meta.update(ech=ech, z_max=z_max, z_min=z_min, largeur_px=W, hauteur_px=H)
+    return out, ok, meta
+
+
+# --------------------------------------------------------------------------------------------
+# Recalage d'une photo sans pose (vos photos) sur une élévation de base, puis assemblage
+def aligner(base, img, masque_base=None, min_inliers=20, echelle_ok=(0.25, 4.0)):
+    """Transformation affine 2x3 (img → base) par points d'intérêt SIFT + RANSAC ; (M, nb_inliers) ou (None, nb)."""
+    g1 = cv2.cvtColor(base, cv2.COLOR_BGR2GRAY)
+    g2 = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    m1 = None if masque_base is None else (masque_base.astype(np.uint8) * 255)
+    sift = cv2.SIFT_create(4000)
+    k1, d1 = sift.detectAndCompute(g1, m1)
+    k2, d2 = sift.detectAndCompute(g2, None)
+    if d1 is None or d2 is None or len(k1) < 10 or len(k2) < 10:
+        return None, 0
+    bons = []
+    for m, n in cv2.BFMatcher().knnMatch(d2, d1, k=2):
+        if m.distance < 0.75 * n.distance:
+            bons.append(m)
+    if len(bons) < min_inliers:
+        return None, len(bons)
+    a = np.float32([k2[m.queryIdx].pt for m in bons])
+    b = np.float32([k1[m.trainIdx].pt for m in bons])
+    M, inl = cv2.estimateAffine2D(a, b, method=cv2.RANSAC, ransacReprojThreshold=6.0, maxIters=5000)
+    n = int(inl.sum()) if inl is not None else 0
+    if M is None or n < min_inliers:
+        return None, n
+    s = math.sqrt(abs(np.linalg.det(M[:, :2])))
+    if not echelle_ok[0] <= s <= echelle_ok[1]:
+        return None, n
+    return M, n
+
+
+def assembler(base, masque_base, ajouts):
+    """Complète `base` (priorité absolue) avec des images déjà dans son repère : [(image, masque), …] par ordre de priorité."""
+    out = base.copy()
+    m = masque_base.copy()
+    for img, mk in ajouts:
+        nouveau = mk & ~m
+        out[nouveau] = img[nouveau]
+        m |= mk
+    return out, m
+
+
+def placer(img, M, forme):
+    """Image + masque warpés dans le repère de base (forme = (H, W))."""
+    h, w = forme
+    out = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_CUBIC, borderValue=(255, 255, 255))
+    mk = cv2.warpAffine(np.full(img.shape[:2], 255, np.uint8), M, (w, h), flags=cv2.INTER_NEAREST) > 0
+    return out, mk

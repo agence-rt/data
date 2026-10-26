@@ -144,6 +144,15 @@ class App(tk.Tk):
         tk.Entry(sortie, textvariable=self.out, font=(FONT, 12), relief="solid", bd=1, bg=FIELD, state="readonly",
                  readonlybackground=FIELD, fg=INK).grid(row=1, column=0, sticky="ew", ipady=5, padx=(0, 10))
         Button(sortie, "PARCOURIR…", self.choisir_dossier, primary=True).grid(row=1, column=1)
+        tk.Label(sortie, text="PHOTOS DE FAÇADE (facultatif — complète Panoramax pour le bouton 4)", font=(FONT, 8, "bold"), bg=BG,
+                 fg=MUTED).grid(row=2, column=0, sticky="w", pady=(6, 0))
+        self.photos = tk.StringVar(value=self.settings.get("dossier_photos", ""))
+        tk.Entry(sortie, textvariable=self.photos, font=(FONT, 11), relief="solid", bd=1, bg=FIELD, state="readonly",
+                 readonlybackground=FIELD, fg=INK).grid(row=3, column=0, sticky="ew", ipady=3, padx=(0, 10))
+        bph = tk.Frame(sortie, bg=BG)
+        bph.grid(row=3, column=1)
+        Button(bph, "CHOISIR…", self.choisir_photos).pack(side="left")
+        Button(bph, "×", lambda: self._photos_vide()).pack(side="left", padx=(4, 0))
         sortie.columnconfigure(0, weight=1)
 
         act = tk.Frame(self, bg=BG)
@@ -283,6 +292,19 @@ class App(tk.Tk):
             self.settings["dossier_sortie"] = d
             save_settings(self.settings)
 
+    def choisir_photos(self):
+        d = filedialog.askdirectory(title="Dossier contenant uniquement les photos de la façade (ex. dossier façade du Dropbox)",
+                                    initialdir=self.photos.get() if os.path.isdir(self.photos.get()) else os.path.expanduser("~"))
+        if d:
+            self.photos.set(d)
+            self.settings["dossier_photos"] = d
+            save_settings(self.settings)
+
+    def _photos_vide(self):
+        self.photos.set("")
+        self.settings["dossier_photos"] = ""
+        save_settings(self.settings)
+
     def ouvrir_dossier(self):
         if self.res:
             open_path(self.res["dossier"])
@@ -354,7 +376,8 @@ class App(tk.Tk):
             elif mode == "dwg":
                 res = pipeline.plans_dwg(args[0], args[1], out, echelle=args[2], progress=say)
             elif mode == "facade":
-                res = pipeline.analyser(args[0], out, progress=say, cache=os.path.join(out, "_cache"), facade_seule=True)
+                res = pipeline.analyser(args[0], out, progress=say, cache=os.path.join(out, "_cache"), facade_seule=True,
+                                        photos_dir=self.photos.get() or None)
             else:
                 res = pipeline.analyser(args[0], out, progress=say, cache=os.path.join(out, "_cache"))
             self.q.put(("ok", res))
@@ -407,13 +430,24 @@ class App(tk.Tk):
                 t = "perpendiculaire à la" if c["type"] == "perpendiculaire" else "parallèle à la"
                 self.fichiers[f"Coupe {t} {c['voie']}"] = os.path.join(d, c["fichier"])
         elif mode == "facade":
-            L = [f"Façades sur rue — {res['adresse']['label']}", "", "Niveau 1 : enveloppe (longueur, sol, égout, silhouette du toit, niveaux), sans ouvertures.", ""]
+            L = [f"Façades sur rue — {res['adresse']['label']}", ""]
             for f in res["facades"]:
                 L.append(f"{f['voie']} : longueur {f['longueur_m']:.2f} m" + (f" (front de parcelle {f['front_parcelle_m']:.1f} m)" if f.get("front_parcelle_m") else ""))
-                self.fichiers[f"Façade {f['voie']}"] = os.path.join(d, f["fichier"])
+                self.fichiers[f"Enveloppe — {f['voie']}"] = os.path.join(d, f["fichier"])
+                ph = f.get("photos") or {}
+                if ph.get("apercu"):
+                    nb = sum(o["type"] in ("baie", "fenetre") for o in ph["ouvertures"])
+                    nbal = sum(o["type"] == "balcon" for o in ph["ouvertures"])
+                    L.append(f"   Niveau 2 : {nb} baie(s), {nbal} balcon(s) détecté(s) — à valider sur l'aperçu")
+                    L += ["   Sources : " + x for x in ph["photos"]]
+                    self.fichiers[f"Ouvertures détectées — {f['voie']}"] = os.path.join(d, ph["apercu"])
+                else:
+                    L.append("   Niveau 1 seulement (enveloppe sans ouvertures)")
+                L += ["   ⚠ " + w for w in ph.get("avertissements", [])]
             if not res["facades"]:
                 L.append("Aucune façade sur rue identifiée.")
-            L += ["", f"Dossier : {d}", "Fichier facades.dxf : calques F<n>_<VOIE>_SOL / FACADE / TOITURE / NIVEAUX / COTES / TEXTES (mètres, altitudes NGF)."]
+            L += ["", f"Dossier : {d}", "Fichier facades.dxf : calques F<n>_<VOIE>_SOL / FACADE / TOITURE / NIVEAUX / BAIES / BALCONS / COTES / TEXTES "
+                  "(mètres, altitudes NGF). Les ouvertures détectées automatiquement sont à vérifier."]
             self.txt.insert("end", "\n".join(L))
         elif mode == "cadastre":
             self.txt.insert("end", f"Plans cadastraux — {res['adresse']['label']}\nParcelle {res['parcelle']['section']} "
@@ -458,7 +492,7 @@ def selftest():
     log = []
     ok = True
     for nom, fn in (("pyproj", _t_pyproj), ("shapely", _t_shapely), ("laspy+lazrs", _t_laspy),
-                    ("matplotlib", _t_mpl), ("plans PDF (pdfplumber, opencv, skimage, ezdxf)", _t_plans), ("tkinter", _t_tk),
+                    ("matplotlib", _t_mpl), ("plans PDF (pdfplumber, opencv, skimage, ezdxf)", _t_plans), ("photos de façade (opencv SIFT)", _t_photos), ("tkinter", _t_tk),
                     ("geo/pipeline", _t_modules)):
         try:
             fn()
@@ -519,6 +553,23 @@ def _t_tk():
     import tkinter  # noqa: F401
 
 
+def _t_photos():
+    """Redressement, SIFT (recalage de photos) et détection de baies sur une image fabriquée."""
+    import cv2
+    import numpy as np
+    from agoa_data import ouvertures, photos
+    img = np.full((600, 800, 3), (150, 190, 215), np.uint8)
+    rng = np.random.default_rng(1)
+    for _ in range(300):
+        x, y = int(rng.integers(0, 760)), int(rng.integers(0, 570))
+        img[y:y + 15, x:x + 25] = np.clip(img[y:y + 15, x:x + 25].astype(int) + int(rng.integers(-14, 14)), 0, 255)
+    cv2.rectangle(img, (100, 100), (180, 260), (60, 55, 50), -1)
+    cv2.SIFT_create(100).detectAndCompute(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), None)
+    out, _ = photos.redresser(img)
+    ouvertures.detecter(img, np.ones(img.shape[:2], bool), 40.0)
+    return f"SIFT et redressement OK ({out.shape[1]}x{out.shape[0]})"
+
+
 def _t_plans():
     """Chaîne PDF → DXF sur un petit plan fabriqué : lecture vectorielle, rendu scanné (pdfium + OpenCV), écriture DXF."""
     import tempfile
@@ -552,7 +603,7 @@ def _t_plans():
 
 
 def _t_modules():
-    from agoa_data import cadastre, coupes, dwg, export, geo, httprange, lidar, pipeline, plans, volumetrie  # noqa: F401
+    from agoa_data import cadastre, coupes, dwg, export, facade_photos, facades, geo, httprange, lidar, ouvertures, panoramax, photos, pipeline, plans, volumetrie  # noqa: F401
 
 
 def main():
