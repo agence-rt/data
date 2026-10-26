@@ -300,3 +300,53 @@ def ecrire_facades_dxf(facades, chemin, ecart=12.0):
         x0 += f.longueur + ecart + 14.0
     doc.saveas(chemin)
     return chemin
+
+
+FINITION_TERRASSE = 0.30     # m : revêtement / étanchéité entre le dessus de dalle et la surface vue par le LiDAR
+
+
+def terrasse_attiques(pts, f, emprise, finition=FINITION_TERRASSE):
+    """Première terrasse derrière la façade à l'alignement, recul et hauteur des étages en attique (d'après le nuage, classe « bâtiment »).
+
+    Renvoie un dict (hauteurs au-dessus du sol de la façade, m) : `terrasse_lidar` (surface vue), `terrasse_dalle` (dessus de dalle = surface − finition),
+    `recul` (distance du nu de façade au retrait), `attique_haut` (haut des étages en retrait) ; {} si non lisible. Stocké dans f.r["terrasse"]."""
+    r = f.r
+    if "sol_med" not in r:
+        return {}
+    ox, oy = f.origine
+    rx, ry = f.droite
+    nx, ny = f.sortant
+    X, Y, Z, C = pts[:, 0], pts[:, 1], pts[:, 2], pts[:, 3]
+    t = (X - ox) * rx + (Y - oy) * ry
+    s = (X - ox) * nx + (Y - oy) * ny
+    h = Z - r["sol_med"]
+    dedans = contains_xy(emprise.buffer(0.3), X, Y)
+    base = (C == 6) & dedans & (t > 0.5) & (t < f.longueur - 0.5) & (h > 8.0) & (s < -0.4) & (s > -12.0)
+    pres = base & (s > -3.0)
+    if pres.sum() < 15:
+        return {}
+    hh = np.sort(h[pres])
+    bins = np.arange(hh[0], hh[-1] + 0.2, 0.2)
+    cnt, ed = np.histogram(hh, bins=bins)
+    dense = np.where(cnt >= 8)[0]
+    if len(dense) == 0:
+        return {}
+    i = int(dense[0])                                         # plus bas palier dense : la terrasse
+    sel = h[pres]
+    j = i + int(np.argmax(cnt[i:i + 5]))                      # sommet du palier (premier mètre au-dessus du plus bas)
+    zt = float(np.median(sel[(sel > ed[j] - 0.1) & (sel < ed[j] + 0.3)]))
+    out = {"terrasse_lidar": round(zt, 2), "terrasse_dalle": round(zt - finition, 2), "finition": finition}
+    # recul : première profondeur dont le quart bas dépasse la terrasse de 2 m (mur de l'attique)
+    recul = None
+    for d0 in np.arange(0.5, 11.0, 0.5):
+        m = base & (s < -d0) & (s >= -d0 - 0.5)
+        if m.sum() >= 15 and np.percentile(h[m], 25) > zt + 2.0:
+            recul = float(d0)
+            break
+    if recul is not None:
+        m = base & (s < -(recul + 0.3)) & (s > -(recul + 2.0))
+        if m.sum() >= 10:
+            out["recul"] = recul
+            out["attique_haut"] = round(float(np.median(h[m])), 2)
+    r["terrasse"] = out
+    return out

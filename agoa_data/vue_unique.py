@@ -12,7 +12,7 @@ import os
 import cv2
 import numpy as np
 
-from . import mosaique, ouvertures as ov, panoramax, vues
+from . import forme as forme_mod, mosaique, ouvertures as ov, panoramax, vues
 
 H_CAMERA = mosaique.H_CAMERA
 
@@ -282,6 +282,12 @@ def traiter(f, dossier, cands=None, telecharger=None, say=print, ech=80, n_etage
     ryt = rythme_central(segs, f.longueur)
     diag = {"vue": {"id": p.id, "azimut": p.azimut, "t_m": round(t, 2), "dist_m": round(d, 2)}, "rotation": info,
             "haut_alignement_coupe_m": r.get("haut_alignement"), **res, "rythme": ryt}
+    try:
+        fm = forme_mod.ecrire(f, res, dossier)
+        if fm:
+            diag["forme_generale"] = {"niveaux": len(fm["niveaux"]), "attiques": len(fm["attiques"]), "terrasse_dalle": fm["terrasse"]["dalle"]}
+    except Exception as ex:
+        say(f"Forme générale non produite : {ex}")
     with open(os.path.join(dossier, "diagnostic.json"), "w", encoding="utf-8") as fh:
         json.dump(diag, fh, ensure_ascii=False, indent=1)
     return ann, diag

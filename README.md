@@ -40,6 +40,11 @@ Saisir une adresse (suggestions pendant la frappe), choisir le dossier **ENREGIS
      baies par case axe × niveau, balcons continus, et **RDC analysé à part** (porches, portes, vitrines). Les tailles de baies
      précises viendront dans un second temps. Aperçu de validation `facade_<n>_<VOIE>_ouvertures.png`, bande `…_elevation.jpg`,
      calques DXF `BAIES / BALCONS / RDC / NIVEAUX`.
+   - *Façade sur rue, méthode « une vue »* (v0.9+) : une vue 360° Panoramax centrée est redressée par rotation ; haut du RDC (corniche),
+     **travées numérotées**, **linteaux** comme repère régulier des niveaux (plancher = dessus de dalle au-dessus du linteau du niveau inférieur),
+     sommet de façade lu sur le nuage : **terrasse à l'alignement** (dessus de dalle = surface LiDAR − 0,30 m) et **attiques en retrait**.
+     Livrables dans `assemblage_<n>` : `3_travees_numerotees.jpg`, `4_forme_generale.png`, `forme_generale.dxf/json`, `diagnostic.json` ;
+     `coupes_simplifiees.dxf` (contour simplifié des coupes) dans le dossier du mode.
    - **Limites** : la détection des ouvertures est automatique mais approximative (trame de baies, balcons continus) — l'aperçu sert à la
      valider ; sans image Panoramax exploitable, seul le niveau 1 est produit (vos photos seules n'ont ni position ni échelle) ; les
      véhicules, arbres et masques à l'avant-plan ne sont pas retirés ; la hauteur de prise de vue est supposée à 2,3 m.

@@ -272,3 +272,22 @@ def profil(pts, emprise, coupe, sol, pas=0.25, tol=0.15, hmin=2.5):
         if (x, y) != net[-1]:
             net.append((x, y))
     return net
+
+
+def corriger_terrasse(pr, terrasse, recul, attique_haut=None):
+    """Remplace dans le contour simplifié la partie avant (de la façade au recul) par la terrasse lue sur la façade, puis le redan
+    de l'attique ; le reste du contour est conservé. `pr` : points (distance, hauteur) ; renvoie un nouveau contour."""
+    if not pr or recul is None:
+        return pr
+    q_in = pr[0][0]
+    reste = [p for p in pr if p[0] > q_in + recul + 0.2]
+    out = [(q_in, 0.0), (q_in, round(terrasse, 3)), (round(q_in + recul, 3), round(terrasse, 3))]
+    if attique_haut:
+        out.append((round(q_in + recul, 3), round(attique_haut, 3)))
+        hmax = attique_haut
+    else:
+        hmax = terrasse
+    for p in reste:
+        if p[1] >= terrasse - 0.01:
+            out.append(p)
+    return out

@@ -114,10 +114,19 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
         if niveaux_visibles:
             facades.definir_niveaux(f, niveaux_visibles)
             f.r["n_visibles"] = int(niveaux_visibles)
-        for c_, pr_, r_ in profils_coupes:                 # sommet de la façade à l'alignement, lu sur la coupe perpendiculaire à cette voie
-            if c_.type == "perpendiculaire" and c_.nom == f.voie and len(pr_) >= 2:
-                f.r["haut_alignement"] = float(pr_[1][1])
-        asm = None
+        if "abscisses" in f.r:                             # terrasse à l'alignement et attiques en retrait (nuage)
+            try:
+                ter = facades.terrasse_attiques(pts, f, b0.geom)
+            except Exception as ex:
+                ter = {}
+                say(f"⚠ Terrasse / attiques : {ex}")
+            if ter:
+                f.r["haut_alignement"] = float(ter["terrasse_dalle"])
+                say(f"Façade {f.voie} : terrasse à {ter['terrasse_dalle']:.2f} m (dessus de dalle), "
+                    + (f"attique en retrait de {ter['recul']:.1f} m jusqu'à {ter['attique_haut']:.2f} m" if "recul" in ter else "attique non lu"))
+                for k_, (c_, pr_, r_) in enumerate(profils_coupes):
+                    if c_.type == "perpendiculaire" and c_.nom == f.voie:
+                        profils_coupes[k_] = (c_, cp.corriger_terrasse(pr_, ter["terrasse_dalle"], ter.get("recul"), ter.get("attique_haut")), r_)
         if avec_photos and "abscisses" in f.r and facade_seule:
             import traceback
             os.makedirs(dfac, exist_ok=True)
