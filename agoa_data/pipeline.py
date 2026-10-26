@@ -88,9 +88,15 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
     liste = cp.definir_coupes(b0.geom, voies)
     sorties = []
     donnees = []
+    profils_coupes = []
     for i, c in enumerate(liste, 1):
         q, z, cl = cp.analyser_coupe(pts, b0.geom, c, v0.altitude_sol)
         donnees.append((c, q, z, cl))
+        if c.r.get("batiment_traverse") and "sol" in c.r:
+            try:
+                profils_coupes.append((c, cp.profil(pts, b0.geom, c, c.r["sol"]), c.r))
+            except Exception as ex:
+                say(f"⚠ Contour simplifié de la coupe {c.nom} : {ex}")
         sens = "perp" if c.type == "perpendiculaire" else "para"
         fn = f"coupe_{i}_{sens}_{re.sub(r'[^A-Za-z0-9]+', '_', c.nom)}.png"
         if not facade_seule:
@@ -107,6 +113,10 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
         ph = None
         if niveaux_visibles:
             facades.definir_niveaux(f, niveaux_visibles)
+            f.r["n_visibles"] = int(niveaux_visibles)
+        for c_, pr_, r_ in profils_coupes:                 # sommet de la façade à l'alignement, lu sur la coupe perpendiculaire à cette voie
+            if c_.type == "perpendiculaire" and c_.nom == f.voie and len(pr_) >= 2:
+                f.r["haut_alignement"] = float(pr_[1][1])
         asm = None
         if avec_photos and "abscisses" in f.r and facade_seule:
             import traceback
@@ -122,6 +132,8 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
                     facades.definir_niveaux(f, max(int(f.r.get("niveaux_n", 7)) - 1, 1))
                 _, dm = vue_unique.traiter(f, os.path.join(dfac, f"assemblage_{i}"), say=dire, n_etages=2)
                 dire(f"Vue redressée : {len(dm['travees_m'])} travées détectées ; planchers lus {dm['planchers_lus_m']} (attendus {dm['planchers_attendus_m']})")
+                if dm.get("avertissement"):
+                    dire("⚠ " + dm["avertissement"])
                 asm = {"dossier": f"assemblage_{i}", "fichier": f"assemblage_{i}/3_travees_numerotees.jpg", "travees": len(dm["travees_m"])}
             except Exception as ex:
                 dire(f"Assemblage Panoramax impossible : {ex}")
@@ -142,11 +154,18 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
             info["assemblage"] = asm
         info["version"] = APP_VERSION
         fac_res.append(info)
+    coupes_simpl = None
+    if profils_coupes:
+        try:
+            dwg.ecrire_coupes_simplifiees_dxf(profils_coupes, os.path.join(dossier, "coupes_simplifiees.dxf"))
+            coupes_simpl = "coupes_simplifiees.dxf"
+        except Exception as ex:
+            say(f"⚠ DXF des coupes simplifiées : {ex}")
     if fac:
         facades.ecrire_facades_dxf(fac, os.path.join(dfac, "facades.dxf"))
     if facade_seule:
         res = {"mode": "facade", "adresse": {"label": adr.label}, "parcelle": {"idu": parc.idu, "section": parc.section,
-               "numero": parc.numero, "contenance": parc.contenance}, "facades": fac_res, "facades_dxf": "facades.dxf" if fac else None,
+               "numero": parc.numero, "contenance": parc.contenance}, "facades": fac_res, "facades_dxf": "facades.dxf" if fac else None, "coupes_simplifiees_dxf": coupes_simpl,
                "dossier": dossier, "date": datetime.datetime.now().strftime("%d/%m/%Y %H:%M")}
         export.ecrire_json(res, os.path.join(dossier, "facades.json"))
         say("Terminé.")
@@ -164,7 +183,7 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
            "dalles": [d.nom for d in dalles], "date": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
            "n_points": int(len(pts)), "batiments": res_b, "voies": [{"nom": v.nom, "distance": round(v.distance, 1)} for v in voies],
            "coupes": sorties, "dossier": dossier, "mode": "volumetrie",
-           "nuage_dxf": "nuage_decoupe.dxf", "n_points_dxf": n_dxf, "coupes_dxf": "coupes.dxf",
+           "nuage_dxf": "nuage_decoupe.dxf", "n_points_dxf": n_dxf, "coupes_dxf": "coupes.dxf", "coupes_simplifiees_dxf": coupes_simpl,
            "facades": fac_res, "dossier_facade": dfac}
     export.ecrire_json(res, os.path.join(dossier, "resultats.json"))
     with open(os.path.join(dossier, "synthese.txt"), "w", encoding="utf-8") as f:

@@ -229,3 +229,46 @@ def tracer_plan(pts, emprise, parcelle, voies, coupes, chemin, marge=40):
     fig.savefig(chemin, dpi=130)
     plt.close(fig)
     return chemin
+
+
+def profil(pts, emprise, coupe, sol, pas=0.25, tol=0.15, hmin=2.5):
+    """Contour simplifié de la coupe : enveloppe haute du bâtiment (classe « bâtiment » dans la tranche), puis simplification
+    (Douglas-Peucker, tolérance `tol` m). Renvoie une liste de points (abscisse, hauteur au-dessus du sol) du nu de façade
+    (q_in, 0) au dernier point du bâtiment, avec les redans (attiques en retrait) comme segments verticaux."""
+    iv = _intervalle_batiment(emprise, coupe)
+    if not iv:
+        return []
+    q, t = _repere(pts, coupe)
+    tr = np.abs(t) < LARGEUR_BANDE / 2
+    dedans = contains_xy(emprise.buffer(0.5), pts[:, 0], pts[:, 1])
+    m = tr & dedans & (pts[:, 3] == 6) & (pts[:, 2] > sol + hmin)
+    q_in, q_out = iv[0][0], iv[-1][1]
+    qs, zs = q[m], pts[m, 2] - sol
+    bins = np.arange(q_in, q_out + pas, pas)
+    env = []
+    for a in bins:
+        s = (qs >= a) & (qs < a + pas)
+        if s.sum() >= 2:
+            env.append((a + pas / 2, float(np.percentile(zs[s], 92))))
+    if not env:
+        return []
+    # lissage médian (3 cases) contre les points isolés
+    z = np.array([e[1] for e in env])
+    zm = np.array([np.median(z[max(i - 1, 0):i + 2]) for i in range(len(z))])
+    pts_env = [(q_in, 0.0), (q_in, float(zm[0]))]
+    for (qq, _), zz in zip(env, zm):
+        pts_env.append((qq - pas / 2, float(zz)))
+        pts_env.append((qq + pas / 2, float(zz)))
+    ligne = LineString(pts_env).simplify(tol, preserve_topology=False)
+    out = [(round(x, 3), round(y, 3)) for x, y in ligne.coords]
+    # redans : arrondir les quasi-verticaux et quasi-horizontaux (écart < tol)
+    net = [out[0]]
+    for x, y in out[1:]:
+        px, py = net[-1]
+        if abs(x - px) < 0.3 and abs(y - py) > 0.3:
+            x = px
+        elif abs(y - py) < 0.15 and abs(x - px) > 0.3:
+            y = py
+        if (x, y) != net[-1]:
+            net.append((x, y))
+    return net

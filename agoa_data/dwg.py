@@ -223,3 +223,45 @@ def ecrire_coupes_dxf(donnees, chemin, ecart=15.0):
         x_off += (qmax - qmin) + ecart + 12.0                      # marge pour les textes à droite des repères
     doc.saveas(chemin)
     return chemin
+
+
+def ecrire_coupes_simplifiees_dxf(items, chemin, ecart=12.0):
+    """Coupes simplifiées (contour du bâtiment, lignes réduites aux sommets utiles), côte à côte.
+
+    `items` : liste de (coupe, profil, r) avec `profil` = points (distance, hauteur au-dessus du sol) de coupes.profil.
+    x = distance le long de la coupe (m), y = altitude NGF (m). Calques C<n>_<TYPE>_<VOIE>_ PROFIL (polyligne du bâtiment),
+    SOL, FAÇADE (nu de façade), COTES et TEXTES (hauteurs des redans, sol, égout/faîtage)."""
+    import ezdxf
+    doc = ezdxf.new("R2018", setup=True)
+    doc.units = 6
+    msp = doc.modelspace()
+    x_off = 0.0
+    for i, (c, pr, r) in enumerate(items, 1):
+        if not pr:
+            continue
+        sol = r["sol"]
+        sens = "PERP" if c.type == "perpendiculaire" else "PARA"
+        base = f"C{i}_{sens}_{nom_calque(c.nom)}"
+        lays = {k: f"{base}_{k}" for k in ("PROFIL", "SOL", "FACADE", "COTES", "TEXTES")}
+        for k, couleur in (("PROFIL", 1), ("SOL", 3), ("FACADE", 5), ("COTES", 4), ("TEXTES", 7)):
+            doc.layers.add(lays[k], color=couleur)
+        q0 = min(p[0] for p in pr)
+        q1 = max(p[0] for p in pr)
+        ox = x_off - q0
+        pts = [(p[0] + ox, p[1] + sol) for p in pr]
+        msp.add_lwpolyline(pts, dxfattribs={"layer": lays["PROFIL"]})
+        msp.add_line((x_off - 4, sol), (x_off + (q1 - q0) + 4, sol), dxfattribs={"layer": lays["SOL"]})
+        msp.add_text(f"Sol {sol:.2f} NGF", height=0.35, dxfattribs={"layer": lays["TEXTES"], "insert": (x_off - 4, sol - 0.7)})
+        msp.add_line((pts[0][0], sol), pts[1][:2], dxfattribs={"layer": lays["FACADE"]})
+        vus = set()
+        for (qq, hh), (x, y) in zip(pr, pts):                       # cote chaque palier (sommet de redan) une seule fois
+            clef = round(hh, 1)
+            if hh > 1.0 and clef not in vus:
+                vus.add(clef)
+                msp.add_line((x, sol), (x, y), dxfattribs={"layer": lays["COTES"], "linetype": "DASHED"})
+                msp.add_text(f"{hh:.2f} m", height=0.3, dxfattribs={"layer": lays["TEXTES"], "insert": (x + 0.15, y + 0.2)})
+        msp.add_text(f"Coupe {c.type} — {c.nom} (contour simplifié)", height=0.5,
+                     dxfattribs={"layer": lays["TEXTES"], "insert": (x_off - 4, sol + max(p[1] for p in pr) + 2.0)})
+        x_off += (q1 - q0) + ecart + 8
+    doc.saveas(chemin)
+    return chemin

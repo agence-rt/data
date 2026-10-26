@@ -87,6 +87,16 @@ def travees(img, mk, ech, z_corniche, longueur, hauteur=1.6):
         segs = [s for s in segs if 0.8 <= s[1] - s[0] <= 2.6 and 0.9 < (s[0] + s[1]) / 2 < longueur - 0.9]
         if len(segs) >= 3:
             break
+    # travées manquées aux extrémités (persiennes fermées, bord de façade) : seuil plus bas, hors gouttières
+    for fac in (0.6, 0.45):
+        cand = [(a / ech, b / ech) for a, b in ov._segments_1d(p, t0 * fac, int(0.4 * ech), int(0.4 * ech))]
+        cand = [c for c in cand if 0.9 <= c[1] - c[0] <= 2.4 and 0.9 < (c[0] + c[1]) / 2 < longueur - 0.9]
+        for c in cand:
+            if segs and all(c[0] >= s2[1] + 0.3 or c[1] <= s2[0] - 0.3 for s2 in segs):
+                segs.append(c)
+        segs.sort()
+        if len(segs) >= 7:
+            break
     return segs
 
 
@@ -123,7 +133,7 @@ def linteaux(img, ech, z_corniche, segs, tol=0.5):
     return out
 
 
-def remettre_a_plat(img, mk, ech, ancres):
+def remettre_a_plat(img, mk, ech, ancres, kappa=1.0):
     """Déformation verticale par morceaux : `ancres` = [(z_lu, z_voulu)] ; sol et sommet fixes."""
     H, W = img.shape[:2]
     pts = sorted(ancres)
@@ -133,8 +143,8 @@ def remettre_a_plat(img, mk, ech, ancres):
             src.append(zl)
             dst.append(zv)
     top = H / ech
-    src.append(top + (dst[-1] - src[-1]) * 0)
-    dst.append(top + (dst[-1] - src[-1]) * 0) if False else dst.append(top)
+    src.append(max(top / kappa, src[-1] + 0.1))
+    dst.append(top)
     z_out = (H - np.arange(H) - 0.5) / ech
     z_src = np.interp(z_out, dst, src)
     my = (H - z_src * ech - 0.5).astype(np.float32)
@@ -154,46 +164,95 @@ def rythme_central(segs, longueur):
     return {"largeur": float(np.median(w[ordre])), "pas": float(np.median(np.diff(cc))) if len(cc) >= 2 else None}
 
 
-def dessiner(img, segs, lint, z_corniche, ech):
+def dessiner(img, segs, niv, ech):
     out = img.copy()
     H, W = out.shape[:2]
     for i, (a, b) in enumerate(segs):
         cv2.rectangle(out, (int(a * ech), 0), (int(b * ech), H - 1), (0, 160, 0), 2)
         cv2.putText(out, str(i + 1), (int((a + b) / 2 * ech) - 15, H - 20), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (0, 160, 0), 4)
-    if z_corniche:
-        y = int(H - z_corniche * ech)
+    if niv.get("rdc"):
+        y = int(H - niv["rdc"] * ech)
         cv2.line(out, (0, y), (W, y), (0, 0, 255), 3)
-        cv2.putText(out, "RDC", (10, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
-    for k, z in enumerate(lint):
+        cv2.putText(out, "haut du RDC", (W - 330, y + 34), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
+    for k, z in enumerate(niv.get("linteaux", [])):          # linteaux : repère régulier
         y = int(H - z * ech)
-        cv2.line(out, (0, y), (W, y), (255, 120, 0), 3)
-        cv2.putText(out, f"R+{k + 1}", (10, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 120, 0), 3)
+        if 0 <= y < H:
+            cv2.line(out, (0, y), (W, y), (255, 200, 0), 2)
+            cv2.putText(out, f"linteau R+{k + 1}", (W - 330, y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 200, 0), 2)
+    for k, z in enumerate(niv.get("planchers", [])):         # planchers : dessus de dalle
+        y = int(H - z * ech)
+        if 0 <= y < H:
+            cv2.line(out, (0, y), (W, y), (255, 80, 0), 3)
+            cv2.putText(out, f"plancher R+{k + 1}", (10, y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 80, 0), 2)
     return out
 
 
-def analyser_elevation(img, mk, ech, longueur, h_niveau=None):
-    """Corniche du RDC, travées numérotées, linteaux (référence des niveaux), remise à plat. Renvoie (plat, mk_plat, dict)."""
+def hauteurs(zc, zs, h_haut, n=None, e_dalle=None):
+    """Niveaux déduits des linteaux (pas régulier), du haut du RDC (corniche) et du sommet de façade à l'alignement (coupe LiDAR).
+
+    Un linteau est surmonté d'une dalle dont le dessus est le plancher du niveau supérieur : plancher R+(k+1) = linteau R+k + e_dalle ;
+    e_dalle est lu entre le plancher R+1 (haut du RDC) et le premier linteau. Renvoie un dict (hauteurs en m, échelle de l'image)."""
+    r = {}
+    pas = float(np.median(np.diff(zs))) if len(zs) >= 2 else None
+    if pas is None:
+        return r
+    # linteau « R+0 » virtuel = linteau du niveau sous R+1 : premier linteau lu − pas ; e_dalle = haut du RDC − ce linteau
+    e = e_dalle if e_dalle is not None else zc - (zs[0] - pas)
+    r["pas_lu"], r["e_dalle"] = pas, float(e)
+    if h_haut:
+        if n is None:
+            n = max(1, int(round((h_haut - zc) / pas)))
+            r["n_auto"] = True
+        r["n"] = int(n)
+        r["sommet_attendu"] = float(zc + n * pas)
+        r["ecart_sommet"] = float(h_haut - (zc + n * pas))
+        r["kappa"] = float(h_haut / (zc + n * pas)) if (zc + n * pas) > 0 else 1.0
+    else:
+        r["n"] = int(n) if n else len(zs)
+    return r
+
+
+def analyser_elevation(img, mk, ech, longueur, h_niveau=None, h_haut=None, n=None):
+    """Corniche du RDC, travées numérotées, linteaux (référence des niveaux), hauteurs d'après la coupe, remise à plat."""
     zc = corniche(img, mk, ech)
     res = {"corniche_rdc_m": None if zc is None else round(zc, 2)}
     if zc is None:
-        return img, mk, res, [], []
+        return img, mk, res, [], [], {}
     segs = travees(img, mk, ech, zc, longueur)
     lint = linteaux(img, ech, zc, segs)
     res["travees_m"] = [[round(a, 2), round(b, 2)] for a, b in segs]
     res["linteaux_lus_m"] = [round(z, 2) for z, _, _ in lint]
-    res["linteaux_nb_travees"] = [n for _, n, _ in lint]
+    res["linteaux_nb_travees"] = [k for _, k, _ in lint]
     zs = [z for z, _, _ in lint]
+    hh = hauteurs(zc, zs, h_haut, n) if len(zs) >= 2 else {}
     if len(zs) >= 2:
-        pas = float(np.median(np.diff(zs)))
+        pas = hh["pas_lu"]
         res["pas_niveau_lu_m"] = round(pas, 2)
-        reg = [zs[0] + k * pas for k in range(len(zs))]          # linteaux régularisés : niveaux de même hauteur
-        res["linteaux_regularises_m"] = [round(z, 2) for z in reg]
-        plat, mk2 = remettre_a_plat(img, mk, ech, list(zip(zs, reg)))
-        if h_niveau:
-            res["ecart_pas_vs_lidar"] = round(pas / h_niveau, 3)
-    else:
-        reg, plat, mk2 = zs, img, mk
-    return plat, mk2, res, segs, reg
+        reg = [zs[0] + k * pas for k in range(len(zs))]
+        kap = hh.get("kappa", 1.0)
+        res.update({"e_dalle_m": round(hh["e_dalle"], 2), "n_niveaux": hh.get("n"), "n_niveaux_auto": bool(hh.get("n_auto")),
+                    "sommet_facade_coupe_m": None if not h_haut else round(h_haut, 2),
+                    "sommet_attendu_image_m": None if "sommet_attendu" not in hh else round(hh["sommet_attendu"], 2),
+                    "ecart_sommet_m": None if "ecart_sommet" not in hh else round(hh["ecart_sommet"], 2),
+                    "kappa_vertical": round(kap, 3)})
+        appliquer = 0.93 <= kap <= 1.07
+        res["kappa_applique"] = bool(appliquer)
+        if h_haut and not appliquer:
+            n_alt = max(1, int(round((h_haut - zc) / pas)))
+            res["avertissement"] = (f"Le sommet de façade lu sur la coupe ({h_haut:.2f} m) ne correspond pas à {hh.get('n')} niveaux de {pas:.2f} m "
+                                    f"au-dessus du RDC ({zc:.2f} m) : écart {hh['ecart_sommet']:+.2f} m ; {n_alt} niveaux conviendraient. "
+                                    f"Image non étirée ; vérifier le nombre de niveaux saisi.")
+        kk = kap if appliquer else 1.0
+        anc = [(zc, kk * zc)] + [(a, kk * b) for a, b in zip(zs, reg)]
+        plat, mk2 = remettre_a_plat(img, mk, ech, anc, kappa=kk)
+        # niveaux dans le repère final
+        n_tot = hh.get("n", len(zs))
+        pl = [kk * (zc + k * pas) for k in range(n_tot + 1)]                  # plancher R+1 … plancher du toit
+        li = [kk * (zs[0] + k * pas) for k in range(n_tot)]                   # linteaux R+1 … R+n
+        res["planchers_m"] = [round(z, 2) for z in pl]
+        res["linteaux_m"] = [round(z, 2) for z in li]
+        return plat, mk2, res, segs, {"planchers": pl, "linteaux": li, "rdc": kk * zc}
+    return img, mk, res, segs, {"rdc": zc}
 
 
 def traiter(f, dossier, cands=None, telecharger=None, say=print, ech=80, n_etages=2, say_diag=None):
@@ -216,14 +275,13 @@ def traiter(f, dossier, cands=None, telecharger=None, say=print, ech=80, n_etage
     hn = r.get("h_niveau") or 2.8
     img, mk, info = vue_redressee(pano, p, f, t, d, ech=ech, z_haut=11.0)
     cv2.imwrite(os.path.join(dossier, "1_vue_redressee.jpg"), img)
-    plat, mk2, res, segs, reg = analyser_elevation(img, mk, ech, f.longueur, h_niveau=hn)
+    plat, mk2, res, segs, niv = analyser_elevation(img, mk, ech, f.longueur, h_niveau=hn, h_haut=r.get("haut_alignement"), n=r.get("n_visibles"))
     cv2.imwrite(os.path.join(dossier, "2_niveaux_remis_a_plat.jpg"), plat)
-    zc = res.get("corniche_rdc_m")
-    ann = dessiner(plat, segs, reg, zc, ech)
+    ann = dessiner(plat, segs, niv, ech)
     cv2.imwrite(os.path.join(dossier, "3_travees_numerotees.jpg"), ann, [cv2.IMWRITE_JPEG_QUALITY, 92])
     ryt = rythme_central(segs, f.longueur)
     diag = {"vue": {"id": p.id, "azimut": p.azimut, "t_m": round(t, 2), "dist_m": round(d, 2)}, "rotation": info,
-            "attendu_lidar": {"h_rdc": round(h_rdc, 2), "h_niveau": round(hn, 2)}, **res, "rythme": ryt}
+            "haut_alignement_coupe_m": r.get("haut_alignement"), **res, "rythme": ryt}
     with open(os.path.join(dossier, "diagnostic.json"), "w", encoding="utf-8") as fh:
         json.dump(diag, fh, ensure_ascii=False, indent=1)
     return ann, diag
