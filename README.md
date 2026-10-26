@@ -31,11 +31,15 @@ Saisir une adresse (suggestions pendant la frappe), choisir le dossier **ENREGIS
 4. **FAÇADES SUR RUE** — dessin de chaque façade donnant sur une voie, dans `<NOM>\facade` : `facade_<n>_<VOIE>.png` (enveloppe),
    `facades.dxf` (calques `F<n>_<VOIE>_SOL / FACADE / TOITURE / NIVEAUX / BAIES / BALCONS / COTES / TEXTES`, mètres, altitudes NGF).
    - *Niveau 1* : longueur (BD TOPO / cadastre), sol, égout, silhouette du toit (LiDAR HD), niveaux (BD TOPO ou 2,90 m estimés).
-   - *Niveau 2* : photos de rue **Panoramax** (base prioritaire, images 360° et plates) projetées géométriquement sur le plan de la façade
-     (position, azimut, tangage), la meilleure couverture sert de base, les autres images sont recalées dessus (SIFT) et ne comblent que
-     les zones non vues. Le champ **PHOTOS DE FAÇADE** (dossier facultatif, ex. dossier façade du Dropbox de l'immeuble) ajoute vos photos :
-     redressées (points de fuite vertical et horizontal) puis recalées sur la base. Les baies et balcons sont détectés
-     (`facade_<n>_<VOIE>_ouvertures.png` = aperçu de validation, `…_elevation.jpg` = élévation photographique) et dessinés dans le DXF.
+   - *Niveau 2 — forme générale* (avant tout détail). Le logiciel demande le **nombre de niveaux au-dessus du RDC visibles depuis la rue**
+     (les attiques en retrait n'en font pas partie) : la hauteur sol → égout est répartie entre un **RDC** (hauteur lue sur la ligne de
+     bandeau des photos, sinon estimée) et des niveaux courants égaux, planchers recalés sur les lignes horizontales des photos.
+     Photos **Panoramax** (base prioritaire, 360° et plates) projetées géométriquement sur le plan de la façade (position, azimut, tangage),
+     fusionnées en une bande à l'échelle sur toute la longueur ; vos photos (champ **PHOTOS DE FAÇADE**, ex. dossier façade du Dropbox)
+     sont redressées puis recalées sur cette bande. Sur la bande : **rythme des baies** (axes verticaux, largeurs régularisées),
+     baies par case axe × niveau, balcons continus, et **RDC analysé à part** (porches, portes, vitrines). Les tailles de baies
+     précises viendront dans un second temps. Aperçu de validation `facade_<n>_<VOIE>_ouvertures.png`, bande `…_elevation.jpg`,
+     calques DXF `BAIES / BALCONS / RDC / NIVEAUX`.
    - **Limites** : la détection des ouvertures est automatique mais approximative (trame de baies, balcons continus) — l'aperçu sert à la
      valider ; sans image Panoramax exploitable, seul le niveau 1 est produit (vos photos seules n'ont ni position ni échelle) ; les
      véhicules, arbres et masques à l'avant-plan ne sont pas retirés ; la hauteur de prise de vue est supposée à 2,3 m.

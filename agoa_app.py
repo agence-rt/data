@@ -353,6 +353,11 @@ class App(tk.Tk):
             if not self.actions[0]._enabled:
                 return
             arguments = (texte,)
+            if mode == "facade":
+                nv = simpledialog.askinteger(
+                    APP_NAME, "Nombre de niveaux AU-DESSUS du RDC, visibles depuis la rue\n(sans les attiques en retrait non visibles de la rue).\n\n"
+                              "Laissez vide ou annulez pour une estimation d'après la hauteur.", parent=self, minvalue=1, maxvalue=25)
+                self._niveaux = nv
         self._occupe(True)
         self.b_ouvrir.enable(False)
         self.b_pdf.enable(False)
@@ -377,7 +382,7 @@ class App(tk.Tk):
                 res = pipeline.plans_dwg(args[0], args[1], out, echelle=args[2], progress=say)
             elif mode == "facade":
                 res = pipeline.analyser(args[0], out, progress=say, cache=os.path.join(out, "_cache"), facade_seule=True,
-                                        photos_dir=self.photos.get() or None)
+                                        photos_dir=self.photos.get() or None, niveaux_visibles=getattr(self, "_niveaux", None))
             else:
                 res = pipeline.analyser(args[0], out, progress=say, cache=os.path.join(out, "_cache"))
             self.q.put(("ok", res))
@@ -436,11 +441,11 @@ class App(tk.Tk):
                 self.fichiers[f"Enveloppe — {f['voie']}"] = os.path.join(d, f["fichier"])
                 ph = f.get("photos") or {}
                 if ph.get("apercu"):
-                    nb = sum(o["type"] in ("baie", "fenetre") for o in ph["ouvertures"])
-                    nbal = sum(o["type"] == "balcon" for o in ph["ouvertures"])
-                    L.append(f"   Niveau 2 : {nb} baie(s), {nbal} balcon(s) détecté(s) — à valider sur l'aperçu")
+                    L.append(f"   Forme générale : RDC {f.get('h_rdc', 0):.2f} m + {f.get('niveaux_n', 1) - 1} niveau(x) de {f.get('h_niveau', 0):.2f} m "
+                             f"({ph.get('niveaux_source', '')}) ; {len(ph['axes'])} axe(s) de baies, {len(ph['baies'])} baie(s), "
+                             f"{len(ph['balcons'])} balcon(s), {len(ph['rdc'])} ouverture(s) de RDC — à valider sur l'aperçu")
                     L += ["   Sources : " + x for x in ph["photos"]]
-                    self.fichiers[f"Ouvertures détectées — {f['voie']}"] = os.path.join(d, ph["apercu"])
+                    self.fichiers[f"Forme générale — {f['voie']}"] = os.path.join(d, ph["apercu"])
                 else:
                     L.append("   Niveau 1 seulement (enveloppe sans ouvertures)")
                 L += ["   ⚠ " + w for w in ph.get("avertissements", [])]
@@ -603,7 +608,7 @@ def _t_plans():
 
 
 def _t_modules():
-    from agoa_data import cadastre, coupes, dwg, export, facade_photos, facades, geo, httprange, lidar, ouvertures, panoramax, photos, pipeline, plans, volumetrie  # noqa: F401
+    from agoa_data import cadastre, coupes, dwg, export, facade_photos, facades, geo, httprange, lidar, ouvertures, panoramax, photos, pipeline, plans, rythme, volumetrie  # noqa: F401
 
 
 def main():

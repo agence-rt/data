@@ -31,11 +31,12 @@ def _dossier(adr, dossier_sortie, sous, nom=None):
     return d
 
 
-def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facade_seule=False, photos_dir=None, avec_photos=True):
+def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facade_seule=False, photos_dir=None, avec_photos=True, niveaux_visibles=None):
     """Exécute toute la chaîne et écrit les livrables dans `dossier_sortie/<NOM>/`. Retourne un dict de résultats.
 
     `adresse` : texte libre ou `geo.Adresse` (déjà choisie dans les suggestions).
     `facade_seule` : ne produit que le dessin des façades sur rue (dossier `facade`), sans les livrables de volumétrie.
+    `niveaux_visibles` : nombre de niveaux au-dessus du RDC visibles depuis la rue (hors attiques en retrait) ; None = estimé.
     `photos_dir` : dossier de photos de façade (facultatif) ; `avec_photos` : élévation photographique (Panoramax + vos photos) et ouvertures.
     """
     say = progress or (lambda s: None)
@@ -102,14 +103,18 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
     for i, f in enumerate(fac, 1):
         facades.profils(pts, f, b0.geom, v0.altitude_sol, b0.etages)
         fn = f"facade_{i}_{re.sub(r'[^A-Za-z0-9]+', '_', f.voie)}.png"
+        ph = None
+        if niveaux_visibles:
+            facades.definir_niveaux(f, niveaux_visibles)
+        if avec_photos and "abscisses" in f.r:
+            ph = facade_photos.traiter(f, i, dfac, say=say, photos_dir=photos_dir, n_visibles=niveaux_visibles)
+            for w in ph["avertissements"]:
+                say("⚠ " + w)
         if "abscisses" in f.r:
             facades.tracer_facade(f, os.path.join(dfac, fn))
         info = {**facades.resume(f), "fichier": fn}
-        if avec_photos and "abscisses" in f.r:
-            ph = facade_photos.traiter(f, i, dfac, say=say, photos_dir=photos_dir)
+        if ph is not None:
             info["photos"] = ph
-            for w in ph["avertissements"]:
-                say("⚠ " + w)
         fac_res.append(info)
     if fac:
         facades.ecrire_facades_dxf(fac, os.path.join(dfac, "facades.dxf"))

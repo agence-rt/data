@@ -157,7 +157,7 @@ def projeter(img, photo, f, z_min, z_max, ech=50.0, hauteur_appareil=2.3, sol=0.
     out = cv2.remap(img, mx.astype(np.float32), my.astype(np.float32), cv2.INTER_LINEAR,
                     borderMode=cv2.BORDER_WRAP if photo.equirect else cv2.BORDER_CONSTANT)
     out[~ok] = 255
-    meta.update(ech=ech, z_max=z_max, z_min=z_min, largeur_px=W, hauteur_px=H)
+    meta.update(ech=ech, z_max=z_max, z_min=z_min, largeur_px=W, hauteur_px=H, incidence=np.clip(graz, 0, 1).astype(np.float32))
     return out, ok, meta
 
 
@@ -208,3 +208,20 @@ def placer(img, M, forme):
     out = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_CUBIC, borderValue=(255, 255, 255))
     mk = cv2.warpAffine(np.full(img.shape[:2], 255, np.uint8), M, (w, h), flags=cv2.INTER_NEAREST) > 0
     return out, mk
+
+
+def assembler_pondere(elements):
+    """Fusion de plusieurs élévations déjà recalées dans le même repère : [(image, masque, poids_par_pixel), …].
+    Les bords de chaque image sont adoucis (distance au bord) et l'incidence favorise les prises de face ; la meilleure image domine."""
+    base = elements[0][0].astype(np.float32)
+    acc = np.zeros_like(base)
+    tot = np.zeros(base.shape[:2], np.float32)
+    for img, mk, poids in elements:
+        d = cv2.distanceTransform(mk.astype(np.uint8), cv2.DIST_L2, 3)
+        w = np.minimum(d / 25.0, 1.0) * poids.astype(np.float32) * mk
+        acc += img.astype(np.float32) * w[..., None]
+        tot += w
+    ok = tot > 1e-3
+    out = np.full_like(base, 255)
+    out[ok] = acc[ok] / tot[ok][:, None]
+    return out.astype(np.uint8), ok

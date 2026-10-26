@@ -152,10 +152,13 @@ class ChaineComplete(unittest.TestCase):
         pho = [panoramax.Photo("A", cam1[0], cam1[1], 5.0, True, "A", "2024-05-01"),
                panoramax.Photo("B", cam2[0], cam2[1], yaw2, False, "B", "2023-05-01", fov=2 * math.degrees(math.atan(750 / 1400)))]
         d = tempfile.mkdtemp()
-        res = facade_photos.traiter(f, 1, d, photos_dir=None, chercher=lambda x, y: pho, telecharger=lambda p: imgs[p.url])
+        res = facade_photos.traiter(f, 1, d, photos_dir=None, n_visibles=5, chercher=lambda x, y: pho, telecharger=lambda p: imgs[p.url])
         self.assertTrue(res["photos"], res["avertissements"])
         self.assertTrue(os.path.exists(os.path.join(d, res["elevation"])))
-        self.assertGreaterEqual(sum(o["type"] in ("baie", "fenetre") for o in res["ouvertures"]), 12)
+        self.assertEqual(res["niveaux_source"], "saisi")
+        self.assertEqual(len(res["niveaux"]), 5)
+        self.assertGreaterEqual(len(res["axes"]), 2)
+        self.assertGreaterEqual(len(res["baies"]), 8)
         facades.ecrire_facades_dxf([f], os.path.join(d, "f.dxf"))
         import ezdxf
         doc = ezdxf.readfile(os.path.join(d, "f.dxf"))
@@ -175,6 +178,18 @@ class ChaineComplete(unittest.TestCase):
         res = facade_photos.traiter(facade(), 1, tempfile.mkdtemp(), chercher=boom, telecharger=None)
         self.assertEqual(res["ouvertures"], [])
         self.assertTrue(any("indisponible" in a for a in res["avertissements"]))
+
+
+class Niveaux(unittest.TestCase):
+    def test_repartition_rdc_et_niveaux_saisis(self):
+        f = facade()                                   # sol 50, égout 70 : H = 20 m
+        niv = facades.definir_niveaux(f, 6, h_rdc=3.2)
+        self.assertEqual(len(niv), 6)
+        self.assertAlmostEqual(niv[0], 53.2)
+        self.assertAlmostEqual(f.r["h_niveau"], (20 - 3.2) / 6)
+        self.assertAlmostEqual(niv[1] - niv[0], f.r["h_niveau"])
+        self.assertEqual(f.r["niveaux_source"], "saisi")
+        self.assertIsNone(facades.definir_niveaux(facade(), 0))
 
 
 class Selection(unittest.TestCase):

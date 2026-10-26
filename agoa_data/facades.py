@@ -178,12 +178,30 @@ def profils(pts, f, emprise, sol_global, etages=None, pas=0.5):
     return r
 
 
+def definir_niveaux(f, n_visibles, h_rdc=None):
+    """Répartit la hauteur sol → égout : un RDC (hauteur `h_rdc`, sinon estimée) puis `n_visibles` niveaux courants égaux.
+    `n_visibles` = niveaux au-dessus du RDC visibles depuis la rue (les attiques en retrait n'en font pas partie).
+    Renseigne r["niveaux"] (altitudes des planchers R+1 … R+n), r["h_rdc"], r["h_niveau"]."""
+    r = f.r
+    if "egout_med" not in r or n_visibles is None or n_visibles < 1:
+        return None
+    H = r["egout_med"] - r["sol_med"]
+    h0 = h_rdc if h_rdc else min(max(H / (n_visibles + 1) * 1.05, 2.6), 4.8)
+    hn = (H - h0) / n_visibles
+    r["h_rdc"] = float(h0)
+    r["h_niveau"] = float(hn)
+    r["niveaux_n"] = int(n_visibles) + 1
+    r["niveaux_source"] = "saisi"
+    r["niveaux"] = [r["sol_med"] + h0 + k * hn for k in range(n_visibles)]
+    return r["niveaux"]
+
+
 def resume(f):
     """Dictionnaire sérialisable (JSON) des résultats d'une façade."""
     r = f.r
     d = {"voie": f.voie, "longueur_m": round(f.longueur, 2),
          "front_parcelle_m": round(f.front_parcelle, 2) if f.front_parcelle else None}
-    for k in ("sol_med", "egout_med", "egout_h", "faitage", "faitage_h", "niveaux_n", "niveaux_source"):
+    for k in ("sol_med", "egout_med", "egout_h", "faitage", "faitage_h", "niveaux_n", "niveaux_source", "h_rdc", "h_niveau"):
         if k in r:
             d[k] = round(r[k], 2) if isinstance(r[k], float) else r[k]
     return d
@@ -239,7 +257,7 @@ def ecrire_facades_dxf(facades, chemin, ecart=12.0):
         if "abscisses" not in r:
             continue
         base = f"F{i}_{nom_calque(f.voie)}"
-        for k, c in (("SOL", 8), ("FACADE", 7), ("TOITURE", 1), ("NIVEAUX", 4), ("COTES", 3), ("TEXTES", 7), ("BAIES", 5), ("BALCONS", 6)):
+        for k, c in (("SOL", 8), ("FACADE", 7), ("TOITURE", 1), ("NIVEAUX", 4), ("COTES", 3), ("TEXTES", 7), ("BAIES", 5), ("BALCONS", 6), ("RDC", 2)):
             doc.layers.add(f"{base}_{k}", color=c)
         T, sol = r["abscisses"], r["sol"]
         ext = np.concatenate([[-2.0], T, [f.longueur + 2.0]])
@@ -255,11 +273,11 @@ def ecrire_facades_dxf(facades, chemin, ecart=12.0):
             msp.add_lwpolyline([(x0 + float(a), float(b)) for a, b in zip(T, r["silhouette"])], dxfattribs={"layer": f"{base}_TOITURE"})
         for k, z in enumerate(r.get("niveaux", []), 1):
             msp.add_line((x0, float(z)), (x0 + f.longueur, float(z)), dxfattribs={"layer": f"{base}_NIVEAUX", "linetype": "DASHED"})
-            msp.add_text(f"R+{k} (estime) {z:.2f} NGF", height=0.3, dxfattribs={"layer": f"{base}_TEXTES", "insert": (x0 + f.longueur + 0.5, float(z))})
+            msp.add_text(f"R+{k} ({'saisi' if r.get('niveaux_source') == 'saisi' else 'estime'}) {z:.2f} NGF", height=0.3, dxfattribs={"layer": f"{base}_TEXTES", "insert": (x0 + f.longueur + 0.5, float(z))})
         for o in r.get("ouvertures", []):
             x, w_, zb, hh = x0 + o["x"], o["largeur"], o["z_bas"], o["hauteur"]
             msp.add_lwpolyline([(x, zb), (x + w_, zb), (x + w_, zb + hh), (x, zb + hh)], close=True,
-                               dxfattribs={"layer": f"{base}_BALCONS" if o["type"] == "balcon" else f"{base}_BAIES"})
+                               dxfattribs={"layer": f"{base}_" + {"balcon": "BALCONS", "rdc": "RDC"}.get(o["type"], "BAIES")})
         yb = float(sol.min()) - 2.0
         try:                                                           # cote de longueur (vraie entité de cote)
             d = msp.add_linear_dim(base=(x0, yb), p1=(x0, yb + 1.0), p2=(x0 + f.longueur, yb + 1.0),
@@ -277,7 +295,7 @@ def ecrire_facades_dxf(facades, chemin, ecart=12.0):
             titre += f" (front de parcelle {f.front_parcelle:.1f} m)"
         msp.add_text(titre, height=0.6, dxfattribs={"layer": f"{base}_TEXTES",
                                                     "insert": (x0, float(max(r.get("faitage", 0), r.get("egout_med", 0))) + 2.5)})
-        msp.add_text("Niveau 2 : ouvertures detectees sur photos (a valider)" if r.get("ouvertures") else "Niveau 1 : enveloppe et niveaux estimes, sans ouvertures", height=0.3,
+        msp.add_text("Niveau 2 : forme generale (niveaux, rythme des baies, RDC) d'apres photos - a valider" if r.get("ouvertures") else "Niveau 1 : enveloppe et niveaux estimes, sans ouvertures", height=0.3,
                      dxfattribs={"layer": f"{base}_TEXTES", "insert": (x0, float(max(r.get("faitage", 0), r.get("egout_med", 0))) + 1.8)})
         x0 += f.longueur + ecart + 14.0
     doc.saveas(chemin)

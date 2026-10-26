@@ -11,8 +11,7 @@ import re
 import cv2
 import numpy as np
 
-from . import ouvertures as ov
-from . import panoramax, photos
+from . import facades, panoramax, photos, rythme
 
 EXT = (".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff")
 
@@ -66,22 +65,24 @@ def construire_elevation(f, say, photos_dir=None, ech=50.0, chercher=panoramax.c
                     cv2.imencode(".jpg", img)[1].tofile(os.path.join(dossier_cache, f"panoramax_{re.sub(r'[^A-Za-z0-9]+', '', p.id)[:24]}.jpg"))
                 zone, _, _ = _zone_facade(f, ech, z_max, ok.shape)
                 couv = float((ok & zone).sum()) / max(float(zone.sum()), 1.0)
-                cands.append((couv, p, el, ok))
+                cands.append((couv, p, el, ok, meta["incidence"]))
             except Exception as e:                                       # noqa: BLE001
                 avert.append(f"Image Panoramax {p.id[:8]} ignorée : {e}")
     if not cands:
         avert.append("Aucune photo Panoramax exploitable pour cette façade : élévation photographique non produite.")
         return None, avert
     cands.sort(key=lambda c: -c[0])
-    couv, p0, base, mask = cands[0]
+    couv, p0, base, mask, inc0 = cands[0]
     sources.append(f"Panoramax {p0.id[:8]} {p0.date} ({'360°' if p0.equirect else 'plate'}, couverture {100 * couv:.0f} %)")
-    for couv2, p, el, ok in cands[1:]:
+    elements = [(base, mask, 2.0 * np.maximum(inc0, 0.05) ** 2)]
+    for couv2, p, el, ok, inc in cands[1:]:
         M, n = photos.aligner(base, el, mask, min_inliers=25, echelle_ok=(0.9, 1.1))
         if M is None or abs(M[0, 2]) > 1.5 * ech or abs(M[1, 2]) > 1.5 * ech:
             avert.append(f"Image Panoramax {p.id[:8]} non recalée sur la base ({n} points concordants) : écartée")
             continue
         e2, m2 = photos.placer(el, M, base.shape[:2])
-        base, mask = photos.assembler(base, mask, [(e2, m2)])
+        i2 = cv2.warpAffine(inc, M, (base.shape[1], base.shape[0]))
+        elements.append((e2, m2, np.maximum(i2, 0.05) ** 2))
         sources.append(f"Panoramax {p.id[:8]} {p.date} (recalée, {n} points)")
     for chemin in photos_du_dossier(photos_dir):
         try:
@@ -94,16 +95,42 @@ def construire_elevation(f, say, photos_dir=None, ech=50.0, chercher=panoramax.c
                 avert.append(f"Photo {os.path.basename(chemin)} : pas assez de points communs avec la base ({n}) : écartée")
                 continue
             e2, m2 = photos.placer(rect, M, base.shape[:2])
-            base, mask = photos.assembler(base, mask, [(e2, m2)])
+            elements.append((e2, m2, np.full(base.shape[:2], 0.35, np.float32)))
             sources.append(f"{os.path.basename(chemin)} (redressée et recalée, {n} points)")
         except Exception as e:                                           # noqa: BLE001
             avert.append(f"Photo {os.path.basename(chemin)} ignorée : {e}")
+    if len(elements) > 1:
+        base, mask = photos.assembler_pondere(elements)
     meta = {"ech": ech, "z_max": z_max, "z_min": z_min}
     return (base, mask, meta, sources), avert
 
 
-def traiter(f, numero, dossier, say=None, photos_dir=None, ech=50.0, avec_panoramax=True, **kw):
-    """Produit l'élévation photographique et les ouvertures d'une façade. Renvoie un dict (jamais d'exception)."""
+def _dessiner(base, res, f, ech, z_max, chemin):
+    """Aperçu de validation : élévation photographique + planchers, baies, balcons et RDC."""
+    img = base.copy()
+    ep = max(2, int(ech / 22))
+
+    def rect(o, col, t):
+        cv2.rectangle(img, (int(o["x"] * ech), int((z_max - o["z_bas"] - o["hauteur"]) * ech)),
+                      (int((o["x"] + o["largeur"]) * ech), int((z_max - o["z_bas"]) * ech)), col, t)
+    for nv in res["niveaux"]:
+        y = int((z_max - nv["z0"]) * ech)
+        cv2.line(img, (0, y), (img.shape[1], y), (255, 120, 0), ep)
+        cv2.putText(img, nv["nom"], (8, y - 8), cv2.FONT_HERSHEY_SIMPLEX, ech / 40, (255, 120, 0), ep)
+    y = int((z_max - f.r["egout_med"]) * ech)
+    cv2.line(img, (0, y), (img.shape[1], y), (255, 120, 0), ep)
+    for o in res["baies"]:
+        rect(o, (0, 140, 255), ep)
+    for o in res["balcons"]:
+        rect(o, (200, 0, 200), ep + 1)
+    for o in res["rdc"]:
+        rect(o, (0, 0, 230), ep + 1)
+    cv2.imencode(".png", img)[1].tofile(chemin)
+
+
+def traiter(f, numero, dossier, say=None, photos_dir=None, ech=50.0, avec_panoramax=True, n_visibles=None, **kw):
+    """Forme générale d'une façade d'après les photos : niveaux (saisis ou estimés), rythme des baies, balcons, RDC à part.
+    Renvoie un dict (jamais d'exception)."""
     say = say or (lambda s: None)
     nom = f"facade_{numero}_{re.sub(r'[^A-Za-z0-9]+', '_', f.voie)}"
     res = {"photos": [], "avertissements": [], "ouvertures": []}
@@ -127,14 +154,26 @@ def traiter(f, numero, dossier, say=None, photos_dir=None, ech=50.0, avec_panora
     cv2.imencode(".jpg", base, [cv2.IMWRITE_JPEG_QUALITY, 92])[1].tofile(os.path.join(dossier, f"{nom}_elevation.jpg"))
     res["elevation"] = f"{nom}_elevation.jpg"
     if valide.sum() < 0.1 * zone.sum():
-        res["avertissements"].append("Moins de 10 % de la façade est vue sur les photos : ouvertures non détectées.")
+        res["avertissements"].append("Moins de 10 % de la façade est vue sur les photos : forme générale non produite.")
         return res
-    det = ov.aligner_sur_trames(ov.detecter(base, valide, ech, zh, zb), ech)
-    ov.dessiner(base, det, os.path.join(dossier, f"{nom}_ouvertures.png"), ech)
+    z_max, sol = meta["z_max"], f.r["sol_med"]
+    n = n_visibles if n_visibles else max(1, f.r.get("niveaux_n", 2) - 1)
+    h_rdc = rythme.estimer_h_rdc(base, valide, ech, z_max, sol)
+    res["rdc_source"] = "photos" if h_rdc else "estimé"
+    facades.definir_niveaux(f, n, h_rdc)
+    d = rythme.caler_planchers(base, valide, ech, z_max, f.r["niveaux"])
+    if d:
+        f.r["niveaux"] = [z + d for z in f.r["niveaux"]]
+        f.r["h_rdc"] += d
+    res["niveaux_source"] = "saisi" if n_visibles else "estimé"
+    f.r["niveaux_source"] = res["niveaux_source"]
+    forme = rythme.analyser(base, valide, ech, z_max, sol, f.r["niveaux"], f.r["egout_med"])
+    res.update({k: forme[k] for k in ("axes", "niveaux", "baies", "balcons", "rdc", "fenetre")})
+    res["ouvertures"] = forme["baies"] + forme["balcons"] + forme["rdc"]
+    _dessiner(base, forme, f, ech, z_max, os.path.join(dossier, f"{nom}_ouvertures.png"))
     res["apercu"] = f"{nom}_ouvertures.png"
-    for o in det:
-        res["ouvertures"].append({"type": o["type"], "x": round(o["x0"] / ech, 2), "largeur": round((o["x1"] - o["x0"]) / ech, 2),
-                                  "z_bas": round(meta["z_max"] - o["y1"] / ech, 2), "hauteur": round((o["y1"] - o["y0"]) / ech, 2)})
-    f.r["ouvertures"] = res["ouvertures"]
-    say(f"Façade {f.voie} : {sum(o['type'] in ('baie', 'fenetre') for o in det)} baie(s), {sum(o['type'] == 'balcon' for o in det)} balcon(s) détecté(s)")
+    f.r["ouvertures"] = [{k: (round(v, 2) if isinstance(v, float) else v) for k, v in o.items()} for o in res["ouvertures"]]
+    f.r["axes"] = forme["axes"]
+    say(f"Façade {f.voie} : {len(forme['axes'])} axe(s) de baies, {len(forme['baies'])} baie(s), {len(forme['balcons'])} balcon(s), "
+        f"{len(forme['rdc'])} ouverture(s) de RDC ; RDC {f.r['h_rdc']:.2f} m + {n} niveaux de {f.r['h_niveau']:.2f} m")
     return res
