@@ -9,6 +9,7 @@ import math
 import re
 
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt                                    # noqa: E402
@@ -127,3 +128,40 @@ def plans_cadastraux(adr, parcelle, dossier, voisines=None, batiments=None, voie
         if progress:
             progress(f"Plan cadastral A3 1/{e} : {n}")
     return noms
+
+
+def apercu(chemin_png, plans_places, contexte):
+    """Aperçu PNG du recalage : cadastre (parcelle en rouge, bâtiments) et murs des plans superposés."""
+    fig, ax = plt.subplots(figsize=(9, 7), dpi=110)
+    xs, ys = [], []
+    if contexte:
+        for b in contexte["batiments"]:
+            ax.add_patch(_patch(b, edgecolor="#808080", lw=0.8))
+        for p in contexte["voisines"]:
+            ax.add_patch(_patch(p.geom, edgecolor="#555555", lw=0.5))
+        ax.add_patch(_patch(contexte["parcelle"].geom, edgecolor=RED, lw=1.8))
+        x0, y0, x1, y1 = contexte["parcelle"].geom.bounds
+        xs += [x0 - 8, x1 + 8]
+        ys += [y0 - 8, y1 + 8]
+    couleurs = ["#0B6E6E", "#C2410C", "#6D28D9", "#15803D", "#B45309"]
+    for i, (nom, calques, _) in enumerate(plans_places):
+        c = couleurs[i % len(couleurs)]
+        for typ, lw in (("TRAITS", 0.3), ("MURS", 0.9)):
+            for pts, ferme in calques.get(typ, []):
+                a = np.array(pts + ([pts[0]] if ferme else []))
+                ax.plot(a[:, 0], a[:, 1], color=c, lw=lw, alpha=0.9 if typ == "MURS" else 0.6)
+                if not contexte:
+                    xs += [a[:, 0].min(), a[:, 0].max()]
+                    ys += [a[:, 1].min(), a[:, 1].max()]
+        ax.plot([], [], color=c, label=nom)
+    if xs:
+        ax.set_xlim(min(xs), max(xs))
+        ax.set_ylim(min(ys), max(ys))
+    ax.set_aspect("equal")
+    ax.set_title("Recalage des plans sur le cadastre (Lambert 93)", fontsize=10)
+    if plans_places:
+        ax.legend(loc="upper right", fontsize=8)
+    ax.tick_params(labelsize=7)
+    fig.tight_layout()
+    fig.savefig(chemin_png)
+    plt.close(fig)

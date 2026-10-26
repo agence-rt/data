@@ -47,7 +47,7 @@ jobs:
           fi
       - name: Compilation du programme
         if: steps.v.outputs.skip == 'false'
-        run: pyinstaller --noconsole --onefile --icon icon.ico --add-data "icon.ico;." --collect-submodules laspy --hidden-import lazrs --collect-data pyproj --name "AGOA DATA" agoa_app.py
+        run: pyinstaller --noconsole --onefile --icon icon.ico --add-data "icon.ico;." --collect-submodules laspy --hidden-import lazrs --collect-data pyproj --collect-all pdfplumber --collect-all pdfminer --collect-all pypdfium2 --collect-all ezdxf --name "AGOA DATA" agoa_app.py
       - name: Auto-test du programme compilé
         if: steps.v.outputs.skip == 'false'
         shell: pwsh

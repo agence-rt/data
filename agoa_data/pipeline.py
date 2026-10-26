@@ -4,7 +4,7 @@ import os
 import re
 import unicodedata
 
-from . import cadastre, export, geo, lidar, volumetrie
+from . import cadastre, dwg, export, geo, lidar, plans, volumetrie
 from . import coupes as cp
 
 TYPES_VOIE = {"rue", "avenue", "av", "boulevard", "bd", "place", "pl", "passage", "impasse", "villa", "allee",
@@ -49,12 +49,6 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None):
     dalles = geo.dalles_lidar(zone, marge=45)
     dossier = os.path.join(dossier_sortie, nom or nom_dossier(adr.label))
     os.makedirs(dossier, exist_ok=True)
-    say("Plans cadastraux A3 (PDF vectoriels 1/500, 1/1000, 1/2000)…")
-    try:
-        plans = cadastre.plans_cadastraux(adr, parc, dossier, progress=say)
-    except Exception as e:                              # noqa: BLE001 — les plans ne doivent pas bloquer la volumétrie
-        plans = []
-        say(f"Plans cadastraux non produits : {e}")
     pts = lidar.points_sur_emprise(dalles, zone, marge=40, progress=say, cache_dir=cache)
     say(f"{len(pts):,} points reçus ; calcul des volumes…".replace(",", " "))
 
@@ -99,9 +93,109 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None):
            "parcelle": {"idu": parc.idu, "section": parc.section, "numero": parc.numero, "contenance": parc.contenance},
            "dalles": [d.nom for d in dalles], "date": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
            "n_points": int(len(pts)), "batiments": res_b, "voies": [{"nom": v.nom, "distance": round(v.distance, 1)} for v in voies],
-           "coupes": sorties, "cadastre_pdfs": plans, "dossier": dossier}
+           "coupes": sorties, "dossier": dossier, "mode": "volumetrie"}
     export.ecrire_json(res, os.path.join(dossier, "resultats.json"))
     with open(os.path.join(dossier, "synthese.txt"), "w", encoding="utf-8") as f:
         f.write(export.synthese_texte(res))
     say("Terminé.")
     return res
+
+
+# --------------------------------------------------------------------------------------------
+def _dossier(adr, dossier_sortie):
+    d = os.path.join(dossier_sortie, nom_dossier(adr.label))
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def cadastres(adresse, dossier_sortie, progress=None):
+    """Bouton « Cadastres » : trois plans cadastraux A3 vectoriels (1/500, 1/1000, 1/2000)."""
+    say = progress or (lambda s: None)
+    say("Recherche de l'adresse…")
+    adr = geo.geocoder(adresse)
+    say(f"Adresse : {adr.label}")
+    say("Parcelle cadastrale…")
+    parc = geo.parcelle_au_point(adr)
+    say(f"Parcelle {parc.section} {parc.numero} ({parc.contenance:.0f} m²) ; lecture du cadastre alentour…")
+    dossier = _dossier(adr, dossier_sortie)
+    noms = cadastre.plans_cadastraux(adr, parc, dossier, progress=say)
+    say("Terminé.")
+    return {"mode": "cadastre", "adresse": {"label": adr.label}, "parcelle": {"idu": parc.idu, "section": parc.section,
+            "numero": parc.numero, "contenance": parc.contenance}, "cadastre_pdfs": noms, "dossier": dossier,
+            "date": datetime.datetime.now().strftime("%d/%m/%Y %H:%M")}
+
+
+def plans_dwg(pdfs, adresse, dossier_sortie, echelle=None, progress=None):
+    """Bouton « Plans DWG » : plans PDF fournis → fond de plan DXF/DWG recalé sur le cadastre (Lambert 93).
+
+    `adresse` peut être vide : le plan est alors laissé dans son repère local, sans recalage.
+    `echelle` : dénominateur imposé (50 pour 1/50) ; sinon lu dans le PDF.
+    """
+    say = progress or (lambda s: None)
+    if not pdfs:
+        raise geo.DataError("Choisissez au moins un plan PDF.")
+    adr = parc = None
+    contexte = None
+    cible = None
+    if adresse:
+        say("Recherche de l'adresse…")
+        adr = geo.geocoder(adresse)
+        say(f"Adresse : {adr.label} ; parcelle et bâtiments…")
+        parc = geo.parcelle_au_point(adr)
+        bats = geo.batiments_de_la_parcelle(parc)
+        cible = bats[0].geom if bats else parc.geom
+        for b in bats[1:]:
+            cible = cible.union(b.geom)
+        zone = parc.geom.buffer(70).envelope
+        contexte = {"parcelle": parc, "voisines": geo.parcelles_dans(zone), "batiments": geo.batiments_dans(zone)}
+        dossier = _dossier(adr, dossier_sortie)
+    else:
+        dossier = os.path.join(dossier_sortie, "PLANS_DWG")
+        os.makedirs(dossier, exist_ok=True)
+
+    places, rapport = [], []
+    for chemin in pdfs:
+        nom = os.path.splitext(os.path.basename(chemin))[0]
+        say(f"Lecture de {nom}…")
+        try:
+            pl = plans.lire_pdf(chemin)
+        except plans.PlanError as e:
+            raise geo.DataError(str(e)) from e
+        ech = echelle or pl.echelle
+        if not ech:
+            raise geo.DataError(f"{nom} : échelle non lue dans le PDF. Indiquez-la (50 pour 1/50, 100 pour 1/100…).")
+        say(f"  {'plan scanné (vectorisation)' if pl.scanne else 'plan vectoriel'}, échelle 1/{ech} "
+            f"({'imposée' if echelle else 'lue dans le PDF'}), {len(pl.traces)} tracés")
+        calques = plans.classer(pl, ech)
+        try:
+            rec = plans.recaler(calques, cible)
+        except plans.PlanError as e:
+            raise geo.DataError(f"{nom} : {e}") from e
+        for w in rec.avertissements:
+            say("  ⚠ " + w)
+        if cible is not None:
+            say(f"  recalé : rotation {rec.angle_deg:.1f}°, dimensions ×{rec.echelle:.3f}, recouvrement {100 * rec.iou:.0f} %")
+        places.append((nom, plans.appliquer(calques, rec), rec.angle_deg))
+        rapport.append({"plan": nom, "echelle": ech, "scanne": pl.scanne, "rotation_deg": round(rec.angle_deg, 2),
+                        "facteur_dimensions": round(rec.echelle, 4), "recouvrement": round(rec.iou, 3),
+                        "recalage_fiable": rec.fiable, "avertissements": rec.avertissements,
+                        "calques": {k: len(v) for k, v in calques.items()}})
+
+    base = nom_dossier(adr.label) if adr else "PLANS"
+    say("Écriture du DXF…")
+    f_dxf = dwg.ecrire_dxf(os.path.join(dossier, f"fond_de_plan_{base}.dxf"), places, contexte)
+    say("Aperçu du recalage…")
+    f_png = os.path.join(dossier, f"apercu_recalage_{base}.png")
+    cadastre.apercu(f_png, places, contexte)
+    say("Conversion en DWG…")
+    f_dwg = dwg.convertir_dwg(f_dxf)
+    if f_dwg:
+        say(f"DWG écrit : {os.path.basename(f_dwg)}")
+    else:
+        say("ODA File Converter introuvable : le DXF est livré (ouvrez-le dans AutoCAD / BricsCAD et enregistrez en DWG). "
+            "Pour obtenir le DWG directement, installez l'ODA File Converter (gratuit).")
+    export.ecrire_json({"plans": rapport, "adresse": adr.label if adr else None}, os.path.join(dossier, f"recalage_{base}.json"))
+    say("Terminé.")
+    return {"mode": "dwg", "adresse": {"label": adr.label if adr else "(sans adresse)"}, "dossier": dossier,
+            "dxf": os.path.basename(f_dxf), "dwg": os.path.basename(f_dwg) if f_dwg else None,
+            "apercu": os.path.basename(f_png), "plans": rapport, "date": datetime.datetime.now().strftime("%d/%m/%Y %H:%M")}

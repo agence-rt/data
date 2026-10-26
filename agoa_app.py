@@ -1,6 +1,7 @@
 """AGOA DATA — volumétrie d'un bâtiment à partir du nuage de points LiDAR HD de l'IGN.
 
-Application Windows de la gamme AGOA (Python 3.10+, tkinter). Saisir une adresse : l'application
+Application Windows de la gamme AGOA (Python 3.10+, tkinter). Saisir une adresse, puis choisir : 1 cadastres (PDF A3),
+2 volumétrie (nuage de points), 3 plans DWG (fond de plan depuis des PDF). Volumétrie : l'application
 trouve la parcelle, les bâtiments et les voies, télécharge le morceau utile du nuage de points,
 calcule la volumétrie et trace les coupes (une perpendiculaire à chaque voie), puis range les
 livrables dans un dossier (nuage .laz, modèle de toiture .asc, coupes .png, plans cadastraux A3 .pdf, synthèse .txt).
@@ -13,7 +14,7 @@ import sys
 import threading
 import tkinter as tk
 import traceback
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from agoa_data import APP_NAME, APP_VERSION, geo, pipeline     # APP_VERSION : à augmenter à chaque publication (cf. README)
 from agoa_data.geo import DataError
@@ -130,8 +131,6 @@ class App(tk.Tk):
         e.bind("<Escape>", lambda ev: self._cache())
         e.bind("<FocusOut>", lambda ev: self.after(200, self._cache))
         e.focus_set()
-        self.btn = Button(form, "ANALYSER", self.lancer, primary=True)
-        self.btn.grid(row=1, column=1)
         form.columnconfigure(0, weight=1)
         self.adr.trace_add("write", lambda *a: self._frappe())
         self.liste = tk.Listbox(self, font=(FONT, 11), bg="#FFFFFF", fg=INK, relief="solid", bd=1, activestyle="none",
@@ -146,6 +145,19 @@ class App(tk.Tk):
                  readonlybackground=FIELD, fg=INK).grid(row=1, column=0, sticky="ew", ipady=5, padx=(0, 10))
         Button(sortie, "PARCOURIR…", self.choisir_dossier, primary=True).grid(row=1, column=1)
         sortie.columnconfigure(0, weight=1)
+
+        act = tk.Frame(self, bg=BG)
+        act.pack(fill="x", padx=18, pady=(10, 2))
+        tk.Label(act, text="QUE SOUHAITEZ-VOUS OBTENIR ?", font=(FONT, 8, "bold"), bg=BG, fg=MUTED).pack(anchor="w")
+        barre = tk.Frame(act, bg=BG)
+        barre.pack(fill="x", pady=(2, 0))
+        self.actions = [
+            Button(barre, "1 · CADASTRES  (PDF A3)", lambda: self.lancer("cadastre"), primary=True),
+            Button(barre, "2 · VOLUMÉTRIE  (nuage de points)", lambda: self.lancer("volumetrie"), primary=True),
+            Button(barre, "3 · PLANS DWG  (depuis PDF)…", lambda: self.lancer("dwg"), primary=True),
+        ]
+        for b in self.actions:
+            b.pack(side="left", padx=(0, 8))
 
         res = tk.Frame(self, bg=BG)
         res.pack(fill="x", padx=18, pady=(8, 2))
@@ -170,8 +182,8 @@ class App(tk.Tk):
         self.log = tk.Text(self.t_suivi, font=("Consolas", 10), bg=FIELD, relief="flat", wrap="word", state="disabled")
         self.log.pack(fill="both", expand=True, padx=2, pady=2)
         self._ecrire("Saisissez une adresse (Paris par défaut) : des suggestions apparaissent pendant la frappe. "
-                     "Choisissez-en une (↑ ↓ Entrée ou clic), puis ANALYSER.\n"
-                     "Premier calcul : 30 s à 1 min (le nuage de points est téléchargé par morceaux).")
+                     "Choisissez-en une (↑ ↓ Entrée ou clic), puis cliquez sur ce que vous souhaitez obtenir.\n"
+                     "Volumétrie : 30 s à 1 min au premier calcul (le nuage de points est téléchargé par morceaux).")
 
         self.txt = tk.Text(self.t_res, font=("Consolas", 10), bg=FIELD, relief="flat", wrap="none", state="disabled")
         self.txt.pack(fill="both", expand=True, padx=2, pady=2)
@@ -257,12 +269,11 @@ class App(tk.Tk):
         return True
 
     def _entree(self, ev=None):
-        """Entrée : valide la suggestion surlignée ; sinon lance l'analyse."""
+        """Entrée : valide la suggestion surlignée."""
         if self.suggestions and self.liste.curselection():
             self._choisit()
         else:
             self._cache()
-            self.lancer()
 
     def choisir_dossier(self):
         d = filedialog.askdirectory(initialdir=self.out.get() if os.path.isdir(self.out.get()) else os.path.expanduser("~"))
@@ -292,14 +303,34 @@ class App(tk.Tk):
         self.log.see("end")
         self.log.config(state="disabled")
 
-    def lancer(self):
+    def _occupe(self, on):
+        for b in self.actions:
+            b.enable(not on)
+
+    def lancer(self, mode="volumetrie"):
         texte = self.adr.get().strip()
-        if not texte:
-            messagebox.showinfo(APP_NAME, "Saisissez une adresse.")
-            return
-        if not self.btn._enabled:
-            return
-        self.btn.enable(False)
+        if mode == "dwg":
+            if not self.actions[2]._enabled:
+                return
+            fichiers = filedialog.askopenfilenames(title="Plans PDF à transformer en fond de plan DWG",
+                                                   filetypes=[("Plans PDF", "*.pdf"), ("Tous les fichiers", "*.*")])
+            if not fichiers:
+                return
+            if not texte and not messagebox.askyesno(
+                    APP_NAME, "Aucune adresse saisie : les plans ne seront pas recalés sur le cadastre.\n\nContinuer quand même ?"):
+                return
+            ech = simpledialog.askinteger(APP_NAME, "Échelle des plans (50 pour 1/50, 100 pour 1/100…).\n"
+                                          "Laissez vide pour la lire dans le PDF (obligatoire pour un plan scanné).",
+                                          parent=self, minvalue=10, maxvalue=1000)
+            arguments = (list(fichiers), texte, ech)
+        else:
+            if not texte:
+                messagebox.showinfo(APP_NAME, "Saisissez une adresse.")
+                return
+            if not self.actions[0]._enabled:
+                return
+            arguments = (texte,)
+        self._occupe(True)
         self.b_ouvrir.enable(False)
         self.b_pdf.enable(False)
         self.settings.update(derniere_adresse=texte, dossier_sortie=self.out.get())
@@ -309,13 +340,20 @@ class App(tk.Tk):
         self.log.delete("1.0", "end")
         self.log.config(state="disabled")
         out = self.out.get()
-        cible = self.choisie if (self.choisie and self.choisie.label == texte) else texte
-        threading.Thread(target=self._travail, args=(cible, out), daemon=True).start()
+        if mode != "dwg":
+            cible = self.choisie if (self.choisie and self.choisie.label == texte) else texte
+            arguments = (cible,)
+        threading.Thread(target=self._travail, args=(mode, arguments, out), daemon=True).start()
 
-    def _travail(self, texte, out):
+    def _travail(self, mode, args, out):
+        say = lambda s: self.q.put(("log", s))
         try:
-            res = pipeline.analyser(texte, out, progress=lambda s: self.q.put(("log", s)),
-                                    cache=os.path.join(out, "_cache"))
+            if mode == "cadastre":
+                res = pipeline.cadastres(args[0], out, progress=say)
+            elif mode == "dwg":
+                res = pipeline.plans_dwg(args[0], args[1], out, echelle=args[2], progress=say)
+            else:
+                res = pipeline.analyser(args[0], out, progress=say, cache=os.path.join(out, "_cache"))
             self.q.put(("ok", res))
         except DataError as e:
             self.q.put(("err", str(e)))
@@ -342,7 +380,7 @@ class App(tk.Tk):
                 else:
                     self._dl = False
                     self._ecrire("\nÉCHEC : " + val)
-                    self.btn.enable(True)
+                    self._occupe(False)
                     messagebox.showerror(APP_NAME, val.split("\n\n")[0])
         except queue.Empty:
             pass
@@ -351,20 +389,38 @@ class App(tk.Tk):
     def _fin(self, res):
         from agoa_data import export
         self.res = res
-        self.btn.enable(True)
+        mode = res.get("mode", "volumetrie")
+        self._occupe(False)
         self.b_ouvrir.enable(True)
         self.b_pdf.enable(bool(res.get("cadastre_pdfs")))
+        d = res["dossier"]
         self.txt.config(state="normal")
         self.txt.delete("1.0", "end")
-        self.txt.insert("end", export.synthese_texte(res))
+        self.fichiers = {}
+        if mode == "volumetrie":
+            self.txt.insert("end", export.synthese_texte(res))
+            self.fichiers["Plan de situation des coupes"] = os.path.join(d, "plan_coupes.png")
+            for c in res["coupes"]:
+                t = "perpendiculaire à la" if c["type"] == "perpendiculaire" else "parallèle à la"
+                self.fichiers[f"Coupe {t} {c['voie']}"] = os.path.join(d, c["fichier"])
+        elif mode == "cadastre":
+            self.txt.insert("end", f"Plans cadastraux — {res['adresse']['label']}\nParcelle {res['parcelle']['section']} "
+                                   f"{res['parcelle']['numero']} (IDU {res['parcelle']['idu']})\n\n" + "\n".join(res["cadastre_pdfs"]) +
+                                   f"\n\nDossier : {d}\nPDF vectoriels A3, Lambert 93 (1 mm sur la feuille = échelle / 1000 m).")
+        else:
+            L = [f"Fond de plan — {res['adresse']['label']}", "",
+                 f"DWG : {res['dwg']}" if res.get("dwg") else f"DXF : {res['dxf']}   (DWG non produit : ODA File Converter absent)", ""]
+            for p in res["plans"]:
+                L.append(f"{p['plan']} : échelle 1/{p['echelle']}, {'scanné' if p['scanne'] else 'vectoriel'}, rotation {p['rotation_deg']:.1f}°, "
+                         f"dimensions ×{p['facteur_dimensions']:.3f}, recouvrement cadastre {100 * p['recouvrement']:.0f} %")
+                L += ["   ⚠ " + w for w in p["avertissements"]]
+            L += ["", f"Dossier : {d}", "Calques : CADASTRE_* et <PLAN>_MURS / _TRAITS / _TEXTES_COTES / _TEXTES. Coordonnées en Lambert 93 (mètres)."]
+            self.txt.insert("end", "\n".join(L))
+            self.fichiers["Aperçu du recalage sur le cadastre"] = os.path.join(d, res["apercu"])
         self.txt.config(state="disabled")
-        d = res["dossier"]
-        self.fichiers = {"Plan de situation des coupes": os.path.join(d, "plan_coupes.png")}
-        for c in res["coupes"]:
-            t = "perpendiculaire à la" if c["type"] == "perpendiculaire" else "parallèle à la"
-            self.fichiers[f"Coupe {t} {c['voie']}"] = os.path.join(d, c["fichier"])
         self.choix["values"] = list(self.fichiers)
-        self.choix.current(0)
+        if self.fichiers:
+            self.choix.current(0)
         self.nb.select(self.t_res)
         self._montre()
 
@@ -390,7 +446,8 @@ def selftest():
     log = []
     ok = True
     for nom, fn in (("pyproj", _t_pyproj), ("shapely", _t_shapely), ("laspy+lazrs", _t_laspy),
-                    ("matplotlib", _t_mpl), ("tkinter", _t_tk), ("geo/pipeline", _t_modules)):
+                    ("matplotlib", _t_mpl), ("plans PDF (pdfplumber, opencv, ezdxf)", _t_plans), ("tkinter", _t_tk),
+                    ("geo/pipeline", _t_modules)):
         try:
             fn()
             log.append(f"OK   {nom}")
@@ -450,8 +507,40 @@ def _t_tk():
     import tkinter  # noqa: F401
 
 
+def _t_plans():
+    """Chaîne PDF → DXF sur un petit plan fabriqué : lecture vectorielle, rendu scanné (pdfium + OpenCV), écriture DXF."""
+    import tempfile
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from PIL import Image
+    from agoa_data import dwg, plans
+    d = tempfile.mkdtemp()
+    fig = plt.figure(figsize=(8.27, 5.83))
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(0, 297)
+    ax.set_ylim(0, 210)
+    ax.plot([60, 220, 220, 60, 60], [50, 50, 150, 150, 50], color="k", lw=2.5)
+    for k in range(1, 6):
+        ax.plot([60 + 26 * k, 60 + 26 * k], [50, 150], color="k", lw=0.4)
+    ax.text(20, 15, "Echelle 1/100")
+    v = os.path.join(d, "v.pdf")
+    fig.savefig(v)
+    fig.savefig(os.path.join(d, "s.png"), dpi=150)
+    plt.close(fig)
+    Image.open(os.path.join(d, "s.png")).convert("L").save(os.path.join(d, "s.pdf"), resolution=150)
+    pv = plans.lire_pdf(v)
+    assert not pv.scanne and pv.echelle == 100, (pv.scanne, pv.echelle)
+    ps = plans.lire_pdf(os.path.join(d, "s.pdf"))
+    assert ps.scanne and len(ps.traces) > 3
+    cal = plans.classer(pv, 100)
+    assert cal["MURS"] and cal["TRAITS"]
+    dwg.ecrire_dxf(os.path.join(d, "t.dxf"), [("TEST", cal, 0.0)])
+    assert os.path.getsize(os.path.join(d, "t.dxf")) > 1000
+
+
 def _t_modules():
-    from agoa_data import coupes, export, geo, httprange, lidar, pipeline, volumetrie  # noqa: F401
+    from agoa_data import cadastre, coupes, dwg, export, geo, httprange, lidar, pipeline, plans, volumetrie  # noqa: F401
 
 
 def main():

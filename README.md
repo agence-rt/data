@@ -8,7 +8,25 @@ Via le **launcher AGOA** (le programme apparaît dans la liste une fois ajouté 
 ou en téléchargeant `AGOA-DATA-Setup-x.y.z.exe` dans la [dernière Release](https://github.com/agence-rt/data/releases/latest).
 L'application s'installe dans `C:\AGOA\data`.
 
-## Ce que fait l'application
+## Trois fonctions, trois boutons
+Saisir une adresse (suggestions pendant la frappe), choisir le dossier **ENREGISTRER SOUS**, puis :
+
+1. **CADASTRES (PDF A3)** — trois plans cadastraux A3 vectoriels (1/500, 1/1000, 1/2000), voir *Livrables*.
+2. **VOLUMÉTRIE (nuage de points)** — volume du bâtiment, modèle de toiture, coupes, nuage découpé (détail ci-dessous).
+3. **PLANS DWG (depuis PDF)** — fond de plan DWG à partir de plans PDF que vous possédez :
+   - choisir un ou plusieurs PDF (plans vectoriels ou **scannés**) ; l'échelle est lue dans le PDF (« 1/50 », « Échelle 1:100 »), sinon elle est demandée
+     (toujours pour un scan) ;
+   - le logiciel sépare les murs (traits épais et poché), les traits fins, et pour un PDF vectoriel les textes et valeurs de cotes ;
+   - le plan est **recalé sur le cadastre** : rotation, translation et, si l'écart reste raisonnable (±15 %) et le recouvrement bon, correction des
+     dimensions, par comparaison de l'emprise des murs avec le bâtiment BD TOPO / la parcelle ; un aperçu `apercu_recalage_*.png` permet de contrôler ;
+   - livrable : `fond_de_plan_<NOM>.dxf` (calques `CADASTRE_*` et `<PLAN>_MURS`, `_TRAITS`, `_TEXTES_COTES`, `_TEXTES`, mètres, Lambert 93) puis
+     `.dwg` si l'**ODA File Converter** (gratuit, opendesign.com) est installé sur le poste ; sinon le DXF s'ouvre dans AutoCAD / BricsCAD /
+     etc. et s'enregistre en DWG en un clic. Le rapport de recalage est écrit dans `recalage_<NOM>.json`.
+   - limites : un scan est vectorisé par traitement d'image (traits fins parfois fragmentés, textes et cotes restent des tracés) ; si le plan ne couvre
+     qu'une partie du bâtiment, le recalage est signalé « peu fiable » et il faut vérifier l'aperçu ; plusieurs plans d'un même immeuble sont superposés
+     sur le même emplacement, chacun dans ses calques.
+
+## Volumétrie : ce que fait l'application
 1. **Adresse** → point (API de géocodage de la Géoplateforme, base adresse nationale). La recherche est **interactive** : des suggestions
    (Paris d'abord) s'affichent pendant la frappe ; ↑ ↓ + Entrée ou clic pour choisir, Échap pour fermer.
 2. **Parcelle** cadastrale (Parcellaire Express) puis **bâtiments** de la BD TOPO situés sur la parcelle.
