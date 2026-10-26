@@ -85,6 +85,39 @@ class Dossier(unittest.TestCase):
         self.assertEqual(n("12 bis Rue des Écoles 75005 Paris"), "ECOLES12BIS")
 
 
+class DxfVolumetrie(unittest.TestCase):
+    def test_nuage_et_coupes_en_dxf(self):
+        import tempfile
+        import ezdxf
+        from agoa_data import dwg
+        pts, emprise = nuage_toit_deux_pans()
+        voie = Voie("Rue Test", LineString([(995, 1992), (1030, 1992)]), 8.0)
+        liste = coupes.definir_coupes(emprise, [voie])
+        donnees = []
+        for c in liste:
+            q, z, cl = coupes.analyser_coupe(pts, emprise, c, SOL)
+            donnees.append((c, q, z, cl))
+        with tempfile.TemporaryDirectory() as d:
+            f, n = dwg.ecrire_nuage_dxf(pts, os.path.join(d, "n.dxf"), emprise=emprise, coupes=liste, maximum=30000)
+            self.assertLessEqual(n, 30000)
+            doc = ezdxf.readfile(f)
+            noms = {la.dxf.name for la in doc.layers}
+            self.assertTrue({"NUAGE_BATI", "NUAGE_SOL", "EMPRISE_BATIMENT", "COUPES_TRACES"} <= noms)
+            g = dwg.ecrire_coupes_dxf(donnees, os.path.join(d, "c.dxf"))
+            doc = ezdxf.readfile(g)
+            textes = " ".join(e.dxf.text for e in doc.modelspace() if e.dxftype() == "TEXT")
+            self.assertIn("Faitage", textes)
+            self.assertIn("Egout", textes)
+
+    def test_eclaircissement_garde_le_bati(self):
+        import numpy as np
+        from agoa_data import dwg
+        pts = np.array([(i, i, 50.0, 2) for i in range(1000)] + [(i, i, 60.0, 6) for i in range(200)], float)
+        r = dwg._eclaircir(pts, 400)
+        self.assertLessEqual(len(r), 400)
+        self.assertEqual(int((r[:, 3] == 6).sum()), 200)
+
+
 class Suggestions(unittest.TestCase):
     def test_suggerer_paris_puis_france(self):
         appels = []

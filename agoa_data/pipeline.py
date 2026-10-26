@@ -24,6 +24,13 @@ def nom_dossier(label):
     return ("".join(mots) + num + suf).upper()
 
 
+def _dossier(adr, dossier_sortie, sous, nom=None):
+    """<dossier choisi>/<NOM>/<sous-dossier> : cadastre, volumetrie ou plan_dwg."""
+    d = os.path.join(dossier_sortie, nom or nom_dossier(adr.label), sous)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
 def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None):
     """Exécute toute la chaîne et écrit les livrables dans `dossier_sortie/<NOM>/`. Retourne un dict de résultats.
 
@@ -47,8 +54,7 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None):
     for b in bats[1:]:
         zone = zone.union(b.geom)
     dalles = geo.dalles_lidar(zone, marge=45)
-    dossier = os.path.join(dossier_sortie, nom or nom_dossier(adr.label))
-    os.makedirs(dossier, exist_ok=True)
+    dossier = _dossier(adr, dossier_sortie, "volumetrie", nom)
     pts = lidar.points_sur_emprise(dalles, zone, marge=40, progress=say, cache_dir=cache)
     say(f"{len(pts):,} points reçus ; calcul des volumes…".replace(",", " "))
 
@@ -77,8 +83,10 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None):
     say("Coupes perpendiculaires aux voies…")
     liste = cp.definir_coupes(b0.geom, voies)
     sorties = []
+    donnees = []
     for i, c in enumerate(liste, 1):
         q, z, cl = cp.analyser_coupe(pts, b0.geom, c, v0.altitude_sol)
+        donnees.append((c, q, z, cl))
         sens = "perp" if c.type == "perpendiculaire" else "para"
         fn = f"coupe_{i}_{sens}_{re.sub(r'[^A-Za-z0-9]+', '_', c.nom)}.png"
         cp.tracer_coupe(c, q, z, cl, b0.geom, os.path.join(dossier, fn))
@@ -88,12 +96,16 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None):
 
     say("Écriture des fichiers…")
     export.ecrire_laz(pts, os.path.join(dossier, "nuage_decoupe.laz"))
+    say("Nuage de points et coupes en DXF…")
+    _, n_dxf = dwg.ecrire_nuage_dxf(pts, os.path.join(dossier, "nuage_decoupe.dxf"), emprise=zone, coupes=liste)
+    dwg.ecrire_coupes_dxf(donnees, os.path.join(dossier, "coupes.dxf"))
     export.ecrire_asc(v0, os.path.join(dossier, "modele_toiture.asc"))
     res = {"adresse": {"label": adr.label, "lon": adr.lon, "lat": adr.lat, "x_l93": adr.x, "y_l93": adr.y},
            "parcelle": {"idu": parc.idu, "section": parc.section, "numero": parc.numero, "contenance": parc.contenance},
            "dalles": [d.nom for d in dalles], "date": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
            "n_points": int(len(pts)), "batiments": res_b, "voies": [{"nom": v.nom, "distance": round(v.distance, 1)} for v in voies],
-           "coupes": sorties, "dossier": dossier, "mode": "volumetrie"}
+           "coupes": sorties, "dossier": dossier, "mode": "volumetrie",
+           "nuage_dxf": "nuage_decoupe.dxf", "n_points_dxf": n_dxf, "coupes_dxf": "coupes.dxf"}
     export.ecrire_json(res, os.path.join(dossier, "resultats.json"))
     with open(os.path.join(dossier, "synthese.txt"), "w", encoding="utf-8") as f:
         f.write(export.synthese_texte(res))
@@ -102,10 +114,6 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None):
 
 
 # --------------------------------------------------------------------------------------------
-def _dossier(adr, dossier_sortie):
-    d = os.path.join(dossier_sortie, nom_dossier(adr.label))
-    os.makedirs(d, exist_ok=True)
-    return d
 
 
 def cadastres(adresse, dossier_sortie, progress=None):
@@ -117,7 +125,7 @@ def cadastres(adresse, dossier_sortie, progress=None):
     say("Parcelle cadastrale…")
     parc = geo.parcelle_au_point(adr)
     say(f"Parcelle {parc.section} {parc.numero} ({parc.contenance:.0f} m²) ; lecture du cadastre alentour…")
-    dossier = _dossier(adr, dossier_sortie)
+    dossier = _dossier(adr, dossier_sortie, "cadastre")
     noms = cadastre.plans_cadastraux(adr, parc, dossier, progress=say)
     say("Terminé.")
     return {"mode": "cadastre", "adresse": {"label": adr.label}, "parcelle": {"idu": parc.idu, "section": parc.section,
@@ -150,9 +158,9 @@ def plans_dwg(pdfs, adresse, dossier_sortie, echelle=None, progress=None):
         cibles.append(("parcelle", parc.geom))             # les caves débordent souvent de l'emprise bâtie
         zone = parc.geom.buffer(70).envelope
         contexte = {"parcelle": parc, "voisines": geo.parcelles_dans(zone), "batiments": geo.batiments_dans(zone)}
-        dossier = _dossier(adr, dossier_sortie)
+        dossier = _dossier(adr, dossier_sortie, "plan_dwg")
     else:
-        dossier = os.path.join(dossier_sortie, "PLANS_DWG")
+        dossier = os.path.join(dossier_sortie, "PLANS_DWG", "plan_dwg")
         os.makedirs(dossier, exist_ok=True)
 
     places, rapport = [], []

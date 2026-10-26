@@ -44,12 +44,14 @@ Saisir une adresse (suggestions pendant la frappe), choisir le dossier **ENREGIS
      et antennes) et de la **pente** indicative du versant.
 
 ## Livrables
-Rangés dans `<ENREGISTRER SOUS>\<NOM>` (nom automatique selon la convention de l'agence : `CHAMPIONNET198`) :
+Rangés dans `<ENREGISTRER SOUS>\<NOM>\<fonction>` (nom automatique selon la convention de l'agence : `CHAMPIONNET198` ; sous-dossiers `cadastre`, `volumetrie`, `plan_dwg`) :
 
 | Fichier | Contenu |
 |---|---|
 | `synthese.txt` | chiffres clés, à coller dans un rapport |
 | `resultats.json` | tous les résultats (parcelle, bâtiments, coupes) pour d'autres programmes AGOA |
+| `nuage_decoupe.dxf` | même nuage en DXF (points 3D, calques par classe : `NUAGE_SOL`, `NUAGE_BATI`, `NUAGE_VEGETATION`…, + `EMPRISE_BATIMENT` et `COUPES_TRACES`), Lambert 93 / NGF ; au-delà de 600 000 points, sol et végétation sont éclaircis (le bâti est conservé) |
+| `coupes.dxf` | coupes en élévation côte à côte (x = distance le long de la coupe, y = altitude NGF) : points de la tranche, profil du toit, sol, nus de façade, égout et faîtage avec valeurs, calques par coupe |
 | `nuage_decoupe.laz` | nuage de points autour du bâtiment (40 m), Lambert 93 / IGN69, classification IGN conservée : s'ouvre dans CloudCompare |
 | `modele_toiture.asc` (+ `.prj`) | modèle numérique de toiture 0,5 m (altitudes NGF) : s'ouvre dans QGIS |
 | `coupe_N_perp_<voie>.png`, `coupe_N_para_<voie>.png` | coupes |
