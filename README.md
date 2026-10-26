@@ -44,7 +44,7 @@ Saisir une adresse (suggestions pendant la frappe), choisir le dossier **ENREGIS
      **travées numérotées**, **linteaux** comme repère régulier des niveaux (plancher = dessus de dalle au-dessus du linteau du niveau inférieur),
      sommet de façade lu sur le nuage : **terrasse à l'alignement** (dessus de dalle = surface LiDAR − 0,30 m) et **attiques en retrait**.
      Livrables dans `assemblage_<n>` : `3_travees_numerotees.jpg`, `4_forme_generale.png`, `forme_generale.dxf/json`, `diagnostic.json` ;
-     `coupes_simplifiees.dxf` (contour simplifié des coupes) dans le dossier du mode.
+     `baies.dxf` (menuiseries, petits-bois, persiennes, garde-corps, appuis, balcons — calques `BAIE_*`) et aperçus `5_baies_dessin.png` / `6_baies_facade_entiere.png` ; `coupes_simplifiees.dxf` (contour simplifié des coupes) dans le dossier du mode. Les attiques en retrait ne sont pas dessinés.
    - **Limites** : la détection des ouvertures est automatique mais approximative (trame de baies, balcons continus) — l'aperçu sert à la
      valider ; sans image Panoramax exploitable, seul le niveau 1 est produit (vos photos seules n'ont ni position ni échelle) ; les
      véhicules, arbres et masques à l'avant-plan ne sont pas retirés ; la hauteur de prise de vue est supposée à 2,3 m.

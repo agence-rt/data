@@ -12,7 +12,7 @@ import os
 import cv2
 import numpy as np
 
-from . import forme as forme_mod, mosaique, ouvertures as ov, panoramax, vues
+from . import baies as baies_mod, forme as forme_mod, mosaique, ouvertures as ov, panoramax, vues
 
 H_CAMERA = mosaique.H_CAMERA
 
@@ -98,6 +98,39 @@ def travees(img, mk, ech, z_corniche, longueur, hauteur=1.6):
         if len(segs) >= 7:
             break
     return segs
+
+
+def completer_par_modele(img, ech, segs, longueur, z_bas, z_haut, seuil=0.40):
+    """Travées manquées : gabarit moyen des travées trouvées (bande z_bas → z_haut, premier niveau), cherché sur toute la largeur ;
+    ajoute les emplacements corrélés (≥ seuil) qui ne recouvrent pas une travée existante."""
+    if len(segs) < 3:
+        return segs
+    H, W = img.shape[:2]
+    ya, yb = int(H - z_haut * ech), int(H - z_bas * ech)
+    if ya < 0 or yb <= ya:
+        return segs
+    g = cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), (0, 0), 2.0)[ya:yb].astype(np.float32)
+    larg = float(np.median([b - a for a, b in segs[1:]]))
+    wp = int(larg * ech)
+    tpl = []
+    for a, b in segs[1:]:
+        c = int((a + b) / 2 * ech)
+        if c - wp // 2 >= 0 and c + wp // 2 <= W:
+            tpl.append(g[:, c - wp // 2:c + wp // 2])
+    if len(tpl) < 2:
+        return segs
+    t = np.median(np.stack(tpl), axis=0)
+    r = cv2.matchTemplate(g, t, cv2.TM_CCOEFF_NORMED)[0]
+    out = list(segs)
+    for x in np.argsort(r)[::-1]:
+        if r[x] < seuil:
+            break
+        c = (x + wp / 2) / ech
+        if not 0.9 < c < longueur - 0.9:
+            continue
+        if all(abs(c - (a + b) / 2) > 1.9 for a, b in out):
+            out.append((c - larg / 2, c + larg / 2))
+    return sorted(out)
 
 
 def linteaux(img, ech, z_corniche, segs, tol=0.5):
@@ -220,6 +253,10 @@ def analyser_elevation(img, mk, ech, longueur, h_niveau=None, h_haut=None, n=Non
         return img, mk, res, [], [], {}
     segs = travees(img, mk, ech, zc, longueur)
     lint = linteaux(img, ech, zc, segs)
+    if lint:                                                       # complète les travées manquées par corrélation avec le gabarit moyen
+        n0 = len(segs)
+        segs = completer_par_modele(img, ech, segs, longueur, zc + 0.6, lint[0][0] - 0.1)
+        res["travees_ajoutees_par_modele"] = len(segs) - n0
     res["travees_m"] = [[round(a, 2), round(b, 2)] for a, b in segs]
     res["linteaux_lus_m"] = [round(z, 2) for z, _, _ in lint]
     res["linteaux_nb_travees"] = [k for _, k, _ in lint]
@@ -284,6 +321,9 @@ def traiter(f, dossier, cands=None, telecharger=None, say=print, ech=80, n_etage
             "haut_alignement_coupe_m": r.get("haut_alignement"), **res, "rythme": ryt}
     try:
         fm = forme_mod.ecrire(f, res, dossier)
+        if fm and res.get("planchers_m") and segs:
+            bx = baies_mod.ecrire(f, fm, plat, ech, segs, res["planchers_m"], res["linteaux_m"], dossier)
+            diag["baies"] = bx
         if fm:
             diag["forme_generale"] = {"niveaux": len(fm["niveaux"]), "attiques": len(fm["attiques"]), "terrasse_dalle": fm["terrasse"]["dalle"]}
     except Exception as ex:

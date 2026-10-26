@@ -20,7 +20,7 @@ def construire(f, diag):
     T = pl[-1]
     forme["terrasse"] = {"dalle": T, "lidar": ter.get("terrasse_lidar"), "ecart_lidar": None if "terrasse_dalle" not in ter else round(T - ter["terrasse_dalle"], 2)}
     top = ter.get("attique_haut")
-    if top and top > T + 2:
+    if False and top and top > T + 2:        # attiques en retrait : non visibles depuis la rue, non dessinés
         na = max(1, int(round((top - T) / (pl[1] - pl[0])))) if len(pl) >= 2 else 2
         h = (top - T) / na
         for k in range(na):
