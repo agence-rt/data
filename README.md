@@ -24,7 +24,7 @@ L'application s'installe dans `C:\AGOA\data`.
      et antennes) et de la **pente** indicative du versant.
 
 ## Livrables
-Rangés dans `<dossier choisi>\<NOM>` (nom proposé selon la convention de l'agence : `CHAMPIONNET198`, modifiable) :
+Rangés dans `<ENREGISTRER SOUS>\<NOM>` (nom automatique selon la convention de l'agence : `CHAMPIONNET198`) :
 
 | Fichier | Contenu |
 |---|---|
@@ -34,7 +34,7 @@ Rangés dans `<dossier choisi>\<NOM>` (nom proposé selon la convention de l'age
 | `modele_toiture.asc` (+ `.prj`) | modèle numérique de toiture 0,5 m (altitudes NGF) : s'ouvre dans QGIS |
 | `coupe_N_perp_<voie>.png`, `coupe_N_para_<voie>.png` | coupes |
 | `plan_coupes.png` | plan de situation des coupes |
-| `plan_cadastral_<IDU>.pdf` | **plan cadastral** A4 vectoriel à l'échelle normalisée (1/200 à 1/5000), parcelle en rouge, numéros, bâtiments, noms de voies, échelle graphique, nord. Dessiné d'après les données ouvertes IGN : ce n'est pas l'extrait officiel DGFiP (à demander sur cadastre.gouv.fr si une valeur juridique est requise) |
+| `plan_cadastral_<IDU>_1-500.pdf`, `_1-1000.pdf`, `_1-2000.pdf` | **plans cadastraux** A3 paysage, centrés sur la parcelle, **PDF vectoriels** sans mise en page (lignes de parcelles, bâtiments, axes de voies, numéros et noms en vrais textes) à récupérer dans un logiciel de dessin ; 1 mm sur la feuille = échelle/1000 m. Données IGN ouvertes, pas l'extrait officiel DGFiP (cadastre.gouv.fr) |
 
 ## Limites
 - Ordre de grandeur (≈ 10 points/m²), pas un relevé de géomètre : lucarnes, souches et cours étroites sont mal restituées.

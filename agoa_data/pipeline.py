@@ -49,14 +49,12 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None):
     dalles = geo.dalles_lidar(zone, marge=45)
     dossier = os.path.join(dossier_sortie, nom or nom_dossier(adr.label))
     os.makedirs(dossier, exist_ok=True)
-    say("Plan cadastral (PDF)…")
+    say("Plans cadastraux A3 (PDF vectoriels 1/500, 1/1000, 1/2000)…")
     try:
-        nom_pdf = cadastre.nom_fichier(parc)
-        ech = cadastre.tracer_plan_cadastral(adr, parc, os.path.join(dossier, nom_pdf))
-        say(f"Plan cadastral : {nom_pdf} (échelle 1/{ech})")
-    except Exception as e:                              # noqa: BLE001 — le plan ne doit pas bloquer la volumétrie
-        nom_pdf = None
-        say(f"Plan cadastral non produit : {e}")
+        plans = cadastre.plans_cadastraux(adr, parc, dossier, progress=say)
+    except Exception as e:                              # noqa: BLE001 — les plans ne doivent pas bloquer la volumétrie
+        plans = []
+        say(f"Plans cadastraux non produits : {e}")
     pts = lidar.points_sur_emprise(dalles, zone, marge=40, progress=say, cache_dir=cache)
     say(f"{len(pts):,} points reçus ; calcul des volumes…".replace(",", " "))
 
@@ -101,7 +99,7 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None):
            "parcelle": {"idu": parc.idu, "section": parc.section, "numero": parc.numero, "contenance": parc.contenance},
            "dalles": [d.nom for d in dalles], "date": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
            "n_points": int(len(pts)), "batiments": res_b, "voies": [{"nom": v.nom, "distance": round(v.distance, 1)} for v in voies],
-           "coupes": sorties, "cadastre_pdf": nom_pdf, "dossier": dossier}
+           "coupes": sorties, "cadastre_pdfs": plans, "dossier": dossier}
     export.ecrire_json(res, os.path.join(dossier, "resultats.json"))
     with open(os.path.join(dossier, "synthese.txt"), "w", encoding="utf-8") as f:
         f.write(export.synthese_texte(res))

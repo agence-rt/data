@@ -114,27 +114,29 @@ class Suggestions(unittest.TestCase):
 
 
 class PlanCadastral(unittest.TestCase):
-    def test_echelle_normalisee(self):
-        self.assertEqual(cadastre.choisir_echelle(40, 30), 200)
-        self.assertEqual(cadastre.choisir_echelle(100, 50), 500)
-        self.assertEqual(cadastre.choisir_echelle(400, 100), 2000)
-        self.assertEqual(cadastre.choisir_echelle(5000, 5000), 5000)
-
-    def test_pdf_ecrit(self):
+    def test_trois_plans_a3_vectoriels(self):
+        import re
         import tempfile
-        cible = box(1000, 2000, 1030, 2015)
-        parc = Parcelle("75118000AH0035", "AH", "35", 450.0, cible)
+        parc = Parcelle("75118000AH0035", "AH", "35", 450.0, box(1000, 2000, 1030, 2015))
         voisines = [Parcelle("x", "AH", "36", 300.0, box(1030, 2000, 1050, 2015)), parc]
         adr = Adresse("1 Rue Test 75018 Paris", 2.3, 48.8, 1015.0, 2007.0, "75118", 1.0)
         with tempfile.TemporaryDirectory() as d:
-            f = os.path.join(d, cadastre.nom_fichier(parc))
-            e = cadastre.tracer_plan_cadastral(adr, parc, f, voisines=voisines, batiments=[box(1005, 2003, 1025, 2012)],
-                                               voies=[("Rue Test", LineString([(990, 1990), (1060, 1995)]))])
-            self.assertEqual(os.path.basename(f), "plan_cadastral_75118000AH0035.pdf")
-            self.assertEqual(e, 500)                       # 60 x 45 m avec marges : ne tient ni à 1/200 ni à 1/250
-            with open(f, "rb") as fh:
-                self.assertEqual(fh.read(5), b"%PDF-")
-            self.assertGreater(os.path.getsize(f), 3000)
+            noms = cadastre.plans_cadastraux(adr, parc, d, voisines=voisines, batiments=[box(1005, 2003, 1025, 2012)],
+                                             voies=[("Rue Test", LineString([(900, 1990), (1160, 1995)]))])
+            self.assertEqual(noms, [f"plan_cadastral_75118000AH0035_1-{e}.pdf" for e in (500, 1000, 2000)])
+            for n in noms:
+                data = open(os.path.join(d, n), "rb").read()
+                self.assertTrue(data.startswith(b"%PDF-"))
+                m = re.search(rb"/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)", data)
+                self.assertAlmostEqual(float(m.group(1)), 420 / 25.4 * 72, delta=1)      # A3 paysage
+                self.assertAlmostEqual(float(m.group(2)), 297 / 25.4 * 72, delta=1)
+
+    def test_fenetre_a_l_echelle(self):
+        parc = Parcelle("i", "AH", "1", 1.0, box(0, 0, 10, 10))
+        cx, cy, dx, dy = cadastre.fenetre(parc, 500)
+        self.assertEqual((cx, cy), (5, 5))
+        self.assertAlmostEqual(2 * dx, 210.0)        # 420 mm × 500
+        self.assertAlmostEqual(2 * dy, 148.5)        # 297 mm × 500
 
 
 class Plage(unittest.TestCase):

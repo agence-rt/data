@@ -264,7 +264,7 @@ def _polygones(geom):
 
 def parcelles_dans(emprise):
     """Toutes les parcelles du Parcellaire Express touchant l'emprise (Polygon Lambert 93) → liste de Parcelle."""
-    d = _wfs_bbox("CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle", emprise, marge=0, count=1000)
+    d = _wfs_bbox("CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle", emprise, marge=0, count=5000)
     out = []
     for f in d.get("features", []):
         p = f["properties"]
@@ -278,7 +278,7 @@ def parcelles_dans(emprise):
 
 def batiments_dans(emprise):
     """Emprises des bâtiments BD TOPO touchant l'emprise → liste de Polygon Lambert 93."""
-    d = _wfs_bbox("BDTOPO_V3:batiment", emprise, marge=0, count=1000)
+    d = _wfs_bbox("BDTOPO_V3:batiment", emprise, marge=0, count=5000)
     out = []
     for f in d.get("features", []):
         g = to_l93(_drop_z(shape(f["geometry"])))
@@ -288,7 +288,7 @@ def batiments_dans(emprise):
 
 def voies_dans(emprise):
     """Voies nommées (BD TOPO) touchant l'emprise, regroupées par nom → liste de (nom, géométrie Lambert 93)."""
-    d = _wfs_bbox("BDTOPO_V3:troncon_de_route", emprise, marge=0, count=1000)
+    d = _wfs_bbox("BDTOPO_V3:troncon_de_route", emprise, marge=0, count=5000)
     par_nom = {}
     for f in d.get("features", []):
         p = f["properties"]

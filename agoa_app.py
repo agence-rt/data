@@ -3,7 +3,7 @@
 Application Windows de la gamme AGOA (Python 3.10+, tkinter). Saisir une adresse : l'application
 trouve la parcelle, les bâtiments et les voies, télécharge le morceau utile du nuage de points,
 calcule la volumétrie et trace les coupes (une perpendiculaire à chaque voie), puis range les
-livrables dans un dossier (nuage .laz, modèle de toiture .asc, coupes .png, plan cadastral .pdf, synthèse .txt).
+livrables dans un dossier (nuage .laz, modèle de toiture .asc, coupes .png, plans cadastraux A3 .pdf, synthèse .txt).
 """
 import json
 import os
@@ -130,30 +130,29 @@ class App(tk.Tk):
         e.bind("<Escape>", lambda ev: self._cache())
         e.bind("<FocusOut>", lambda ev: self.after(200, self._cache))
         e.focus_set()
-        tk.Label(form, text="DOSSIER", font=(FONT, 8, "bold"), bg=BG, fg=MUTED).grid(row=0, column=1, sticky="w")
-        self.nom = tk.StringVar()
-        en = tk.Entry(form, textvariable=self.nom, font=(FONT, 11), width=18, relief="solid", bd=1, bg=FIELD)
-        en.grid(row=1, column=1, ipady=6, padx=(0, 10))
-        en.bind("<Key>", lambda ev: setattr(self, "_nom_modifie", True))     # nom saisi à la main : on n'y touche plus
         self.btn = Button(form, "ANALYSER", self.lancer, primary=True)
-        self.btn.grid(row=1, column=2)
+        self.btn.grid(row=1, column=1)
         form.columnconfigure(0, weight=1)
-        self.adr.trace_add("write", lambda *a: self._suggere_nom())
         self.adr.trace_add("write", lambda *a: self._frappe())
         self.liste = tk.Listbox(self, font=(FONT, 11), bg="#FFFFFF", fg=INK, relief="solid", bd=1, activestyle="none",
                                 selectbackground=RED, selectforeground="#FFFFFF", exportselection=False, height=1)
         self.liste.bind("<ButtonRelease-1>", lambda ev: self._choisit())
 
         sortie = tk.Frame(self, bg=BG)
-        sortie.pack(fill="x", padx=18, pady=(2, 6))
-        tk.Label(sortie, text="Enregistrer dans :", font=(FONT, 9), bg=BG, fg=MUTED).pack(side="left")
+        sortie.pack(fill="x", padx=18, pady=(8, 2))
+        tk.Label(sortie, text="ENREGISTRER SOUS", font=(FONT, 8, "bold"), bg=BG, fg=MUTED).grid(row=0, column=0, sticky="w")
         self.out = tk.StringVar(value=self.settings.get("dossier_sortie") or os.path.join(os.path.expanduser("~"), "Documents", "AGOA DATA"))
-        tk.Label(sortie, textvariable=self.out, font=(FONT, 9), bg=BG, fg=INK).pack(side="left", padx=6)
-        Button(sortie, "Changer…", self.choisir_dossier).pack(side="left", padx=4)
-        self.b_ouvrir = Button(sortie, "Ouvrir le dossier du résultat", self.ouvrir_dossier)
+        tk.Entry(sortie, textvariable=self.out, font=(FONT, 12), relief="solid", bd=1, bg=FIELD, state="readonly",
+                 readonlybackground=FIELD, fg=INK).grid(row=1, column=0, sticky="ew", ipady=5, padx=(0, 10))
+        Button(sortie, "PARCOURIR…", self.choisir_dossier, primary=True).grid(row=1, column=1)
+        sortie.columnconfigure(0, weight=1)
+
+        res = tk.Frame(self, bg=BG)
+        res.pack(fill="x", padx=18, pady=(8, 2))
+        self.b_ouvrir = Button(res, "Ouvrir le dossier du résultat", self.ouvrir_dossier)
         self.b_ouvrir.pack(side="right")
         self.b_ouvrir.enable(False)
-        self.b_pdf = Button(sortie, "Ouvrir le plan cadastral (PDF)", self.ouvrir_pdf)
+        self.b_pdf = Button(res, "Plans cadastraux (PDF) ▾", self.menu_pdf)
         self.b_pdf.pack(side="right", padx=6)
         self.b_pdf.enable(False)
 
@@ -265,16 +264,6 @@ class App(tk.Tk):
             self._cache()
             self.lancer()
 
-    def _suggere_nom(self):
-        if getattr(self, "_nom_modifie", False):
-            return
-        t = self.adr.get().strip()
-        if t:
-            try:
-                self.nom.set(pipeline.nom_dossier(t if any(ch.isdigit() for ch in t[-6:]) else t + " 75000"))
-            except Exception:
-                pass
-
     def choisir_dossier(self):
         d = filedialog.askdirectory(initialdir=self.out.get() if os.path.isdir(self.out.get()) else os.path.expanduser("~"))
         if d:
@@ -286,9 +275,15 @@ class App(tk.Tk):
         if self.res:
             open_path(self.res["dossier"])
 
-    def ouvrir_pdf(self):
-        if self.res and self.res.get("cadastre_pdf"):
-            open_path(os.path.join(self.res["dossier"], self.res["cadastre_pdf"]))
+    def menu_pdf(self):
+        """Petit menu : un plan A3 par échelle."""
+        if not (self.res and self.res.get("cadastre_pdfs")) or not self.b_pdf._enabled:
+            return
+        m = tk.Menu(self, tearoff=0, font=(FONT, 10))
+        for n in self.res["cadastre_pdfs"]:
+            ech = n.rsplit("_1-", 1)[-1].removesuffix(".pdf")
+            m.add_command(label=f"Plan A3 au 1/{ech}", command=lambda n=n: open_path(os.path.join(self.res["dossier"], n)))
+        m.tk_popup(self.b_pdf.winfo_rootx(), self.b_pdf.winfo_rooty() + self.b_pdf.winfo_height())
 
     # ------------------------------------------------------------------ calcul
     def _ecrire(self, s):
@@ -313,15 +308,14 @@ class App(tk.Tk):
         self.log.config(state="normal")
         self.log.delete("1.0", "end")
         self.log.config(state="disabled")
-        nom = (self.nom.get().strip() or None)
         out = self.out.get()
         cible = self.choisie if (self.choisie and self.choisie.label == texte) else texte
-        threading.Thread(target=self._travail, args=(cible, out, nom), daemon=True).start()
+        threading.Thread(target=self._travail, args=(cible, out), daemon=True).start()
 
-    def _travail(self, texte, out, nom):
+    def _travail(self, texte, out):
         try:
             res = pipeline.analyser(texte, out, progress=lambda s: self.q.put(("log", s)),
-                                    cache=os.path.join(out, "_cache"), nom=nom)
+                                    cache=os.path.join(out, "_cache"))
             self.q.put(("ok", res))
         except DataError as e:
             self.q.put(("err", str(e)))
@@ -359,7 +353,7 @@ class App(tk.Tk):
         self.res = res
         self.btn.enable(True)
         self.b_ouvrir.enable(True)
-        self.b_pdf.enable(bool(res.get("cadastre_pdf")))
+        self.b_pdf.enable(bool(res.get("cadastre_pdfs")))
         self.txt.config(state="normal")
         self.txt.delete("1.0", "end")
         self.txt.insert("end", export.synthese_texte(res))
