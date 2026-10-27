@@ -127,6 +127,7 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
                 for k_, (c_, pr_, r_) in enumerate(profils_coupes):
                     if c_.type == "perpendiculaire" and c_.nom == f.voie:
                         profils_coupes[k_] = (c_, cp.corriger_terrasse(pr_, ter["terrasse_dalle"], ter.get("recul"), ter.get("attique_haut")), r_)
+        asm = None
         if avec_photos and "abscisses" in f.r and facade_seule:
             import traceback
             os.makedirs(dfac, exist_ok=True)
