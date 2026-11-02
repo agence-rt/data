@@ -8,6 +8,9 @@ from shapely.ops import nearest_points
 from shapely import contains_xy
 
 LARGEUR_BANDE = 1.5     # m : épaisseur de la tranche de nuage projetée sur la coupe
+AVANT = 32.0            # m : coupe perpendiculaire, de l'axe de la voie vers l'autre côté de la rue (immeubles d'en face)
+APRES = 45.0            # m : coupe perpendiculaire, du côté du bâtiment vers l'arrière (fonds de parcelle, immeubles voisins)
+LATERAL = 55.0          # m : coupe parallèle, de part et d'autre du centre du bâtiment (mitoyens)
 
 
 @dataclass
@@ -20,6 +23,7 @@ class Coupe:
     trace: LineString        # tracé pour le plan
     voie_distance: float
     r: dict = field(default_factory=dict)   # résultats chiffrés
+    contexte: dict = field(default_factory=dict)   # sol réel et profils des bâtiments voisins (coupes.contexte)
 
 
 def _unit(v):
@@ -43,7 +47,7 @@ def definir_coupes(emprise, voies, avec_parallele=True):
         if np.dot(n, [cen.x - pc.x, cen.y - pc.y]) < 0:
             n = -n
         P0 = np.array([pc.x, pc.y])
-        trace = LineString([P0 - n * 3, P0 + n * 38])
+        trace = LineString([P0 - n * AVANT, P0 + n * APRES])
         coupes.append(Coupe(v.nom, "perpendiculaire", tuple(P0), tuple(n), tuple(tg), trace, v.distance))
     if avec_parallele and voies:
         v = voies[0]
@@ -53,7 +57,7 @@ def definir_coupes(emprise, voies, avec_parallele=True):
         tg = _unit([b.x - a.x, b.y - a.y])
         n = np.array([-tg[1], tg[0]])
         c = np.array([emprise.centroid.x, emprise.centroid.y])
-        trace = LineString([c - tg * 45, c + tg * 45])
+        trace = LineString([c - tg * LATERAL, c + tg * LATERAL])
         coupes.append(Coupe(v.nom, "parallele", tuple(c), tuple(tg), tuple(n), trace, v.distance))
     return coupes
 
@@ -158,9 +162,9 @@ def tracer_coupe(coupe, q, z, c, emprise, chemin):
     couleurs = {1: "#999999", 2: "#8b5a2b", 3: "#66aa66", 4: "#66aa66", 5: "#22aa22", 6: "#dd3333", 65: "#bbbbbb"}
     fig, ax = plt.subplots(figsize=(13, 6.5))
     if coupe.type == "perpendiculaire":
-        xmin, xmax = -3, (r.get("q_out", 20) + 8)
+        xmin, xmax = -AVANT, (r.get("q_out", 20) + 30)
     else:
-        xmin, xmax = (r.get("q_in", -20) - 8), (r.get("q_out", 20) + 8)
+        xmin, xmax = (r.get("q_in", -20) - 30), (r.get("q_out", 20) + 30)
     ok = (q > xmin) & (q < xmax)
     for k in np.unique(c[ok]):
         m = ok & (c == k)
@@ -291,3 +295,87 @@ def corriger_terrasse(pr, terrasse, recul, attique_haut=None):
         if p[1] >= terrasse - 0.01:
             out.append(p)
     return out
+
+
+def contexte(pts, emprise, coupe, sol, pas=0.25, tol=0.2, hmin=2.5, ecart_max=1.5, largeur_min=1.5):
+    """Sol réel et profil simplifié des bâtiments voisins le long de toute la coupe (immeubles d'en face, mitoyens, fonds de parcelle).
+
+    Même tranche que la coupe. Sol : médiane des points « sol » par case de 0,5 m, interpolée sous les bâtiments. Chaque bâtiment voisin
+    est un ensemble continu de cases (trous < `ecart_max`) hors de l'emprise étudiée, dont les points « bâtiment » dépassent le sol de plus
+    de `hmin` : enveloppe haute (92e centile) puis Douglas-Peucker (`tol`). Les abscisses sont celles de la coupe, les hauteurs sont
+    relatives à `sol`. Renvoie {"sol": [(q, h)], "voisins": [{"profil": [(q, h)], "q0", "q1", "hmax" (relative au sol de référence), "hauteur" (au-dessus du sol local), "hbase"}]} (et le stocke dans coupe.contexte)."""
+    q, t = _repere(pts, coupe)
+    if coupe.type == "perpendiculaire":
+        qa, qb = -AVANT, max([iv[1] for iv in _intervalle_batiment(emprise, coupe)] + [0]) + APRES
+    else:
+        qa, qb = -LATERAL, LATERAL
+    tr = (np.abs(t) < LARGEUR_BANDE / 2) & (q >= qa) & (q <= qb)
+    q, z, c = q[tr], pts[tr, 2], pts[tr, 3]
+    if len(q) < 20:
+        coupe.contexte = {"sol": [], "voisins": []}
+        return coupe.contexte
+    # sol réel
+    pg = 0.5
+    cg = np.arange(qa, qb + pg, pg)
+    sg = []
+    for a in cg:
+        m = (c == 2) & (q >= a) & (q < a + pg)
+        sg.append(float(np.median(z[m])) if m.sum() >= 2 else np.nan)
+    sg = np.array(sg)
+    bon = ~np.isnan(sg)
+    if bon.sum() < 3:
+        sg = np.full(len(cg), sol)
+    else:
+        sg = np.interp(cg, cg[bon], sg[bon])
+    sol_loc = lambda x: np.interp(x, cg + pg / 2, sg)
+    # bâtiments : cases contenant des points « bâtiment » hauts, hors emprise étudiée
+    iv = _intervalle_batiment(emprise, coupe)
+    hors = np.ones(len(q), bool)
+    for a, b in iv:
+        hors &= ~((q > a - 0.05) & (q < b + 0.05))
+    bat = hors & (c == 6) & (z > sol_loc(q) + hmin)
+    qs, zs = q[bat], z[bat]
+    cases = []
+    for a in np.arange(qa, qb, pas):
+        s = (qs >= a) & (qs < a + pas)
+        if s.sum() >= 2:
+            cases.append((a + pas / 2, float(np.percentile(zs[s], 92))))
+    voisins = []
+    if cases:
+        groupes, cur = [], [cases[0]]
+        for e in cases[1:]:
+            if e[0] - cur[-1][0] <= ecart_max:
+                cur.append(e)
+            else:
+                groupes.append(cur)
+                cur = [e]
+        groupes.append(cur)
+        for g in groupes:
+            if g[-1][0] - g[0][0] < largeur_min or len(g) < 4:
+                continue
+            x = np.array([e[0] for e in g])
+            h = np.array([e[1] for e in g])
+            hm = np.array([np.median(h[max(i - 1, 0):i + 2]) for i in range(len(h))])
+            q0, q1 = float(x[0] - pas / 2), float(x[-1] + pas / 2)
+            ligne = [(q0, float(sol_loc(q0))), (q0, float(hm[0]))]
+            for xx, hh in zip(x, hm):
+                ligne += [(xx - pas / 2, float(hh)), (xx + pas / 2, float(hh))]
+            ligne.append((q1, float(sol_loc(q1))))
+            simple = LineString(ligne).simplify(tol, preserve_topology=False)
+            prof = [(round(a, 3), round(b - sol, 3)) for a, b in simple.coords]
+            net = [prof[0]]
+            for a, b in prof[1:]:                     # redans nets : quasi-verticaux et quasi-horizontaux
+                pa, pb = net[-1]
+                if abs(a - pa) < 0.3 and abs(b - pb) > 0.3:
+                    a = pa
+                elif abs(b - pb) < 0.15 and abs(a - pa) > 0.3:
+                    b = pb
+                if (a, b) != net[-1]:
+                    net.append((a, b))
+            voisins.append({"profil": net, "q0": round(q0, 2), "q1": round(q1, 2), "hmax": round(float(hm.max() - sol), 2),
+                            "hauteur": round(float(hm.max() - min(sol_loc(q0), sol_loc(q1))), 2),
+                            "hbase": round(float(min(sol_loc(q0), sol_loc(q1)) - sol), 2)})
+    # sol simplifié pour le dessin
+    lg = LineString([(float(a + pg / 2), float(b - sol)) for a, b in zip(cg, sg)]).simplify(0.08, preserve_topology=False)
+    coupe.contexte = {"sol": [(round(a, 3), round(b, 3)) for a, b in lg.coords], "voisins": voisins}
+    return coupe.contexte

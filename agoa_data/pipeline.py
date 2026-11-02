@@ -94,6 +94,11 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
         donnees.append((c, q, z, cl))
         if c.r.get("batiment_traverse") and "sol" in c.r:
             try:
+                cp.contexte(pts, b0.geom, c, c.r["sol"])
+            except Exception as ex:
+                say(f"⚠ Bâtiments voisins de la coupe {c.nom} : {ex}")
+        if c.r.get("batiment_traverse") and "sol" in c.r:
+            try:
                 profils_coupes.append((c, cp.profil(pts, b0.geom, c, c.r["sol"]), c.r))
             except Exception as ex:
                 say(f"⚠ Contour simplifié de la coupe {c.nom} : {ex}")

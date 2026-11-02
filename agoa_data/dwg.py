@@ -242,16 +242,29 @@ def ecrire_coupes_simplifiees_dxf(items, chemin, ecart=12.0):
         sol = r["sol"]
         sens = "PERP" if c.type == "perpendiculaire" else "PARA"
         base = f"C{i}_{sens}_{nom_calque(c.nom)}"
-        lays = {k: f"{base}_{k}" for k in ("PROFIL", "SOL", "FACADE", "COTES", "TEXTES")}
-        for k, couleur in (("PROFIL", 1), ("SOL", 3), ("FACADE", 5), ("COTES", 4), ("TEXTES", 7)):
+        lays = {k: f"{base}_{k}" for k in ("PROFIL", "SOL", "FACADE", "COTES", "TEXTES", "VOISINS")}
+        for k, couleur in (("PROFIL", 1), ("SOL", 3), ("FACADE", 5), ("COTES", 4), ("TEXTES", 7), ("VOISINS", 8)):
             doc.layers.add(lays[k], color=couleur)
         q0 = min(p[0] for p in pr)
         q1 = max(p[0] for p in pr)
-        ox = x_off - q0
+        ctx = getattr(c, "contexte", None) or {}
+        voisins = ctx.get("voisins", [])
+        xmin_ctx = min([q0] + [v["q0"] for v in voisins] + [p[0] for p in ctx.get("sol", [])])
+        xmax_ctx = max([q1] + [v["q1"] for v in voisins] + [p[0] for p in ctx.get("sol", [])])
+        ox = x_off - xmin_ctx                       # le décalage tient compte de toute la coupe élargie
         pts = [(p[0] + ox, p[1] + sol) for p in pr]
         msp.add_lwpolyline(pts, dxfattribs={"layer": lays["PROFIL"]})
-        msp.add_line((x_off - 4, sol), (x_off + (q1 - q0) + 4, sol), dxfattribs={"layer": lays["SOL"]})
+        if len(ctx.get("sol", [])) >= 2:             # sol réel (rue, cours) sur toute la coupe
+            msp.add_lwpolyline([(a + ox, b + sol) for a, b in ctx["sol"]], dxfattribs={"layer": lays["SOL"]})
+        else:
+            msp.add_line((x_off - 4, sol), (x_off + (q1 - q0) + 4, sol), dxfattribs={"layer": lays["SOL"]})
         msp.add_text(f"Sol {sol:.2f} NGF", height=0.35, dxfattribs={"layer": lays["TEXTES"], "insert": (x_off - 4, sol - 0.7)})
+        for k, v in enumerate(voisins, 1):           # immeubles voisins : contour simplifié et hauteurs
+            vp = [(a + ox, b + sol) for a, b in v["profil"]]
+            msp.add_lwpolyline(vp, dxfattribs={"layer": lays["VOISINS"]})
+            xm = (v["q0"] + v["q1"]) / 2 + ox
+            msp.add_text(f"Voisin {k} : sommet {v['hmax'] + sol:.2f} NGF ({v['hauteur']:.1f} m)", height=0.3,
+                         dxfattribs={"layer": lays["TEXTES"], "insert": (v["q0"] + ox, v["hmax"] + sol + 0.5)})
         msp.add_line((pts[0][0], sol), pts[1][:2], dxfattribs={"layer": lays["FACADE"]})
         vus = set()
         for (qq, hh), (x, y) in zip(pr, pts):                       # cote chaque palier (sommet de redan) une seule fois
@@ -262,6 +275,6 @@ def ecrire_coupes_simplifiees_dxf(items, chemin, ecart=12.0):
                 msp.add_text(f"{hh:.2f} m", height=0.3, dxfattribs={"layer": lays["TEXTES"], "insert": (x + 0.15, y + 0.2)})
         msp.add_text(f"Coupe {c.type} — {c.nom} (contour simplifié)", height=0.5,
                      dxfattribs={"layer": lays["TEXTES"], "insert": (x_off - 4, sol + max(p[1] for p in pr) + 2.0)})
-        x_off += (q1 - q0) + ecart + 8
+        x_off += (xmax_ctx - xmin_ctx) + ecart + 8
     doc.saveas(chemin)
     return chemin

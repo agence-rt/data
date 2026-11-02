@@ -61,6 +61,7 @@ Saisir une adresse (suggestions pendant la frappe), choisir le dossier **ENREGIS
 6. **Coupes** dans le nuage (tranche de 1,5 m) :
    - **une coupe perpendiculaire à chaque voie** qui borde le bâtiment (rue, villa, passage…), au droit de la façade qui lui fait face ;
    - une coupe parallèle à la voie la plus proche ;
+   - les coupes sont **élargies au voisinage** : 32 m de l'autre côté de la rue (immeubles d'en face), 45 m vers l'arrière, ±55 m pour la coupe parallèle (mitoyens). `coupes_simplifiees.dxf` contient le sol réel et le contour simplifié de chaque immeuble voisin (calque `…_VOISINS`, sommet NGF et hauteur indiqués) ;
    - lecture automatique de l'**égout** (versant côté voie prolongé jusqu'au nu de façade), du **faîtage** (point haut robuste aux souches
      et antennes) et de la **pente** indicative du versant.
 
