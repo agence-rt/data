@@ -171,7 +171,7 @@ def ecrire_coupes_dxf(donnees, chemin, ecart=15.0):
     """Coupes en élévation, côte à côte : x = distance le long de la coupe (m), y = altitude NGF (m).
 
     `donnees` : liste de (Coupe analysée, q, z, classes) telle que renvoyée par coupes.analyser_coupe.
-    Par coupe, calques C<n>_<TYPE>_<VOIE>_ NUAGE (points de la tranche), PROFIL_TOIT, REPERES (sol, égout, faîtage, nus de façade)
+    Par coupe, calques C<n>_<TYPE>_<VOIE>_ NUAGE (points de toute la tranche, voisins compris), PROFIL_TOIT, VOISINS (contour des immeubles de l'environnement), SOL_REEL, REPERES (sol, égout, faîtage, nus de façade)
     et TEXTES (titre et valeurs chiffrées).
     """
     import ezdxf
@@ -181,15 +181,13 @@ def ecrire_coupes_dxf(donnees, chemin, ecart=15.0):
     msp = doc.modelspace()
     x_off = 0.0
     for i, (c, q, z, cl) in enumerate(donnees, 1):
-        if c.r.get("batiment_traverse") and "q_in" in c.r:            # on garde le bâtiment et 15 m de part et d'autre
-            garde = (q > c.r["q_in"] - 15) & (q < c.r["q_out"] + 15)
-            q, z, cl = q[garde], z[garde], cl[garde]
+        # toute la tranche est conservée : bâtiment étudié, immeubles d'en face, mitoyens et fonds de parcelle
         if len(q) == 0:
             continue
         sens = "PERP" if c.type == "perpendiculaire" else "PARA"
         base = f"C{i}_{sens}_{nom_calque(c.nom)}"
-        lays = {k: f"{base}_{k}" for k in ("NUAGE", "PROFIL_TOIT", "REPERES", "TEXTES")}
-        for k, couleur in (("NUAGE", 8), ("PROFIL_TOIT", 1), ("REPERES", 4), ("TEXTES", 7)):
+        lays = {k: f"{base}_{k}" for k in ("NUAGE", "PROFIL_TOIT", "REPERES", "TEXTES", "VOISINS", "SOL_REEL")}
+        for k, couleur in (("NUAGE", 8), ("PROFIL_TOIT", 1), ("REPERES", 4), ("TEXTES", 7), ("VOISINS", 30), ("SOL_REEL", 3)):
             doc.layers.add(lays[k], color=couleur)
         qmin, qmax = float(q.min()), float(q.max())
         ox = x_off - qmin                                          # abscisse 0 de la coupe → x_off
@@ -218,6 +216,14 @@ def ecrire_coupes_dxf(donnees, chemin, ecart=15.0):
             if "pente_deg" in r:
                 msp.add_text(f"Pente {r['pente_deg']:.0f} deg", height=0.35,
                              dxfattribs={"layer": lays["TEXTES"], "insert": (a, haut + 1.0)})
+        ctx = getattr(c, "contexte", None) or {}
+        if r.get("batiment_traverse") and "sol" in r and ctx:        # bâtiments de l'environnement et sol réel (altitudes NGF)
+            if len(ctx.get("sol", [])) >= 2:
+                msp.add_lwpolyline([(a + ox, b + r["sol"]) for a, b in ctx["sol"]], dxfattribs={"layer": lays["SOL_REEL"]})
+            for k, v in enumerate(ctx.get("voisins", []), 1):
+                msp.add_lwpolyline([(a + ox, b + r["sol"]) for a, b in v["profil"]], dxfattribs={"layer": lays["VOISINS"]})
+                msp.add_text(f"Voisin {k} : sommet {v['hmax'] + r['sol']:.2f} NGF ({v['hauteur']:.1f} m)", height=0.4,
+                             dxfattribs={"layer": lays["TEXTES"], "insert": (v["q0"] + ox, v["hmax"] + r["sol"] + 0.6)})
         titre = f"Coupe {i} {'perpendiculaire' if sens == 'PERP' else 'parallele'} - {c.nom}"
         msp.add_text(titre, height=0.6, dxfattribs={"layer": lays["TEXTES"], "insert": (x_off, float(z.max()) + 2.5)})
         x_off += (qmax - qmin) + ecart + 12.0                      # marge pour les textes à droite des repères
