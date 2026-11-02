@@ -8,6 +8,7 @@ from . import APP_VERSION
 from . import cadastre, dwg, export, facade_photos, facades, geo, lidar, mosaique, plans, vue_unique, volumetrie
 from . import coupes as cp
 from . import routes as routes_mod
+from . import modele3d
 from . import toiture as toiture_mod
 
 TYPES_VOIE = {"rue", "avenue", "av", "boulevard", "bd", "place", "pl", "passage", "impasse", "villa", "allee",
@@ -214,6 +215,22 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
         say(f"  {toit_res['n_pans']} pan(s) de toiture lus dans le nuage")
     except Exception as ex:
         say(f"⚠ Plan de toiture : {ex}")
+    say("Volume 3D (OBJ et DXF)…")
+    volume_obj = None
+    try:
+        mailles = []
+        for k_, (b_, v_) in enumerate(ok, 1):
+            try:
+                mailles.append((f"Batiment_{k_}", modele3d.maillage(b_.geom, v_)))
+            except Exception as ex:
+                say(f"⚠ Volume 3D du bâtiment {k_} : {ex}")
+        if mailles:
+            modele3d.ecrire_obj(mailles, os.path.join(dossier, "volume_batiment.obj"))
+            modele3d.ecrire_dxf(mailles, os.path.join(dossier, "volume_batiment.dxf"))
+            volume_obj = "volume_batiment.obj"
+            say(f"  {len(mailles)} bâtiment(s), {sum(len(m['toit']) + len(m['sol']) + 2 * len(m['facades']) for _, m in mailles):,} triangles".replace(",", " "))
+    except Exception as ex:
+        say(f"⚠ Volume 3D : {ex}")
     say("Écriture des fichiers…")
     export.ecrire_laz(pts, os.path.join(dossier, "nuage_decoupe.laz"))
     say("Nuage de points et coupes en DXF…")
@@ -228,7 +245,7 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
            "nuage_dxf": "nuage_decoupe.dxf", "n_points_dxf": n_dxf, "coupes_dxf": "coupes.dxf", "coupes_simplifiees_dxf": coupes_simpl,
            "facades": fac_res, "dossier_facade": dfac,
            "profils_routes": routes_res, "profils_routes_dxf": "profils_routes.dxf" if routes_res else None,
-           "plan_toiture": toit_res, "plan_toiture_dxf": "plan_toiture.dxf" if toit_res else None}
+           "volume_obj": volume_obj, "volume_dxf": "volume_batiment.dxf" if volume_obj else None, "plan_toiture": toit_res, "plan_toiture_dxf": "plan_toiture.dxf" if toit_res else None}
     export.ecrire_json(res, os.path.join(dossier, "resultats.json"))
     with open(os.path.join(dossier, "synthese.txt"), "w", encoding="utf-8") as f:
         f.write(export.synthese_texte(res))
