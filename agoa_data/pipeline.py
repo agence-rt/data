@@ -7,6 +7,8 @@ import unicodedata
 from . import APP_VERSION
 from . import cadastre, dwg, export, facade_photos, facades, geo, lidar, mosaique, plans, vue_unique, volumetrie
 from . import coupes as cp
+from . import routes as routes_mod
+from . import toiture as toiture_mod
 
 TYPES_VOIE = {"rue", "avenue", "av", "boulevard", "bd", "place", "pl", "passage", "impasse", "villa", "allee",
               "quai", "cite", "square", "route", "chemin", "cour", "faubourg", "fbg", "voie", "sentier", "ruelle"}
@@ -187,6 +189,31 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
         return res
     cp.tracer_plan(pts, b0.geom, parc, voies, liste, os.path.join(dossier, "plan_coupes.png"))
 
+    say("Profils en long des voies autour de la parcelle (pentes)…")
+    profils_routes, routes_res = [], []
+    try:
+        try:
+            autour = geo.voies_dans(zone.buffer(30))
+        except Exception:
+            autour = []
+        noms = {n for n, _ in autour}
+        autour += [(v.nom, v.geom) for v in voies if v.nom not in noms]
+        profils_routes = routes_mod.profils(pts, autour, b0.geom, zone.buffer(38))
+        if profils_routes:
+            routes_mod.tracer(profils_routes, os.path.join(dossier, "profils_routes.png"))
+            routes_mod.ecrire_dxf(profils_routes, os.path.join(dossier, "profils_routes.dxf"))
+            routes_res = routes_mod.resume(profils_routes)
+            for r_ in routes_res:
+                say(f"  {r_['voie']} : pente moyenne {r_['pente_moyenne_pct']} %, max {r_['pente_max_pct']} % ({r_['sens_montant']})")
+    except Exception as ex:
+        say(f"⚠ Profils des voies : {ex}")
+    say("Plan de toiture…")
+    toit_res = None
+    try:
+        toit_res = toiture_mod.plan(pts, b0.geom, v0.altitude_sol, os.path.join(dossier, "plan_toiture.png"), os.path.join(dossier, "plan_toiture.dxf"))
+        say(f"  {toit_res['n_pans']} pan(s) de toiture lus dans le nuage")
+    except Exception as ex:
+        say(f"⚠ Plan de toiture : {ex}")
     say("Écriture des fichiers…")
     export.ecrire_laz(pts, os.path.join(dossier, "nuage_decoupe.laz"))
     say("Nuage de points et coupes en DXF…")
@@ -199,7 +226,9 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
            "n_points": int(len(pts)), "batiments": res_b, "voies": [{"nom": v.nom, "distance": round(v.distance, 1)} for v in voies],
            "coupes": sorties, "dossier": dossier, "mode": "volumetrie",
            "nuage_dxf": "nuage_decoupe.dxf", "n_points_dxf": n_dxf, "coupes_dxf": "coupes.dxf", "coupes_simplifiees_dxf": coupes_simpl,
-           "facades": fac_res, "dossier_facade": dfac}
+           "facades": fac_res, "dossier_facade": dfac,
+           "profils_routes": routes_res, "profils_routes_dxf": "profils_routes.dxf" if routes_res else None,
+           "plan_toiture": toit_res, "plan_toiture_dxf": "plan_toiture.dxf" if toit_res else None}
     export.ecrire_json(res, os.path.join(dossier, "resultats.json"))
     with open(os.path.join(dossier, "synthese.txt"), "w", encoding="utf-8") as f:
         f.write(export.synthese_texte(res))
