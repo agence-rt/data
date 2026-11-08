@@ -153,6 +153,12 @@ class App(tk.Tk):
         bph.grid(row=3, column=1)
         Button(bph, "CHOISIR…", self.choisir_photos).pack(side="left")
         Button(bph, "×", lambda: self._photos_vide()).pack(side="left", padx=(4, 0))
+        self.dessins = tk.BooleanVar(value=self.settings.get("dessins", True))
+        self.videos = tk.BooleanVar(value=self.settings.get("dessins_videos", True))
+        opts = tk.Frame(sortie, bg=BG)
+        opts.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        for var, texte in ((self.dessins, "Dessins d'architecte de la façade (bouton 4)"), (self.videos, "avec vidéos")):
+            tk.Checkbutton(opts, text=texte, variable=var, font=(FONT, 9), bg=BG, fg=INK, activebackground=BG, selectcolor=FIELD).pack(side="left", padx=(0, 14))
         sortie.columnconfigure(0, weight=1)
 
         act = tk.Frame(self, bg=BG)
@@ -361,7 +367,7 @@ class App(tk.Tk):
         self._occupe(True)
         self.b_ouvrir.enable(False)
         self.b_pdf.enable(False)
-        self.settings.update(derniere_adresse=texte, dossier_sortie=self.out.get())
+        self.settings.update(derniere_adresse=texte, dossier_sortie=self.out.get(), dessins=bool(self.dessins.get()), dessins_videos=bool(self.videos.get()))
         save_settings(self.settings)
         self.nb.select(self.t_suivi)
         self.log.config(state="normal")
@@ -382,7 +388,8 @@ class App(tk.Tk):
                 res = pipeline.plans_dwg(args[0], args[1], out, echelle=args[2], progress=say)
             elif mode == "facade":
                 res = pipeline.analyser(args[0], out, progress=say, cache=os.path.join(out, "_cache"), facade_seule=True,
-                                        photos_dir=self.photos.get() or None, niveaux_visibles=getattr(self, "_niveaux", None))
+                                        photos_dir=self.photos.get() or None, niveaux_visibles=getattr(self, "_niveaux", None),
+                                        dessins=("video" if self.videos.get() else "png") if self.dessins.get() else None)
             else:
                 res = pipeline.analyser(args[0], out, progress=say, cache=os.path.join(out, "_cache"))
             self.q.put(("ok", res))
@@ -449,6 +456,16 @@ class App(tk.Tk):
                 else:
                     L.append("   Niveau 1 seulement (enveloppe sans ouvertures)")
                 L += ["   ⚠ " + w for w in ph.get("avertissements", [])]
+                asm = f.get("assemblage") or {}
+                dess = asm.get("dessins") or {}
+                if dess:
+                    dd = os.path.join(d, asm["dossier"], "dessins")
+                    L.append(f"   Dessins d'architecte : {', '.join(k for k in dess if k != 'planche')} + planche A3 (dossier {asm['dossier']}\\dessins, facade.json)")
+                    for k, v in dess.items():
+                        if k == "planche":
+                            self.fichiers[f"Planche — {f['voie']}"] = os.path.join(dd, v["png"])
+                        else:
+                            self.fichiers[f"Dessin {k} — {f['voie']}"] = os.path.join(dd, v["png"])
             if not res["facades"]:
                 L.append("Aucune façade sur rue identifiée.")
             L += ["", f"Dossier : {d}", "Fichier facades.dxf : calques F<n>_<VOIE>_SOL / FACADE / TOITURE / NIVEAUX / BAIES / BALCONS / COTES / TEXTES "

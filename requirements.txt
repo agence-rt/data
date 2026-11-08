@@ -8,3 +8,4 @@ ezdxf>=1.3
 opencv-python-headless>=4.8
 pdfplumber>=0.11
 scikit-image>=0.22
+imageio-ffmpeg>=0.4.9

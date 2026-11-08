@@ -12,7 +12,7 @@ import os
 import cv2
 import numpy as np
 
-from . import baies as baies_mod, forme as forme_mod, mosaique, ouvertures as ov, panoramax, vues
+from . import baies as baies_mod, dessins as dessins_mod, forme as forme_mod, mosaique, ouvertures as ov, panoramax, vues
 
 H_CAMERA = mosaique.H_CAMERA
 
@@ -292,7 +292,7 @@ def analyser_elevation(img, mk, ech, longueur, h_niveau=None, h_haut=None, n=Non
     return img, mk, res, segs, {"rdc": zc}
 
 
-def traiter(f, dossier, cands=None, telecharger=None, say=print, ech=80, n_etages=2, say_diag=None):
+def traiter(f, dossier, cands=None, telecharger=None, say=print, ech=80, n_etages=2, say_diag=None, dessins=None, adresse=None):
     """Pipeline complet sur une façade. `f.r` doit contenir les planchers (definir_niveaux) pour la remise à plat."""
     telecharger = telecharger or panoramax.telecharger
     os.makedirs(dossier, exist_ok=True)
@@ -328,6 +328,16 @@ def traiter(f, dossier, cands=None, telecharger=None, say=print, ech=80, n_etage
             diag["forme_generale"] = {"niveaux": len(fm["niveaux"]), "attiques": len(fm["attiques"]), "terrasse_dalle": fm["terrasse"]["dalle"]}
     except Exception as ex:
         say(f"Forme générale non produite : {ex}")
+    if diag.get("baies") and diag.get("forme_generale"):
+        try:                                                  # relevé complet de la façade (facade.json) puis dessins d'architecte
+            fac = dessins_mod.releve(fm, diag["baies"], adresse=adresse)
+            dessins_mod.ecrire_releve(fac, os.path.join(dossier, "facade.json"))
+            diag["facade_json"] = "facade.json"
+            if dessins:
+                say("Dessins d'architecte (élévation, ombres, teintes, trame, annotations, calepinage)…")
+                diag["dessins"] = dessins_mod.generer(fac, os.path.join(dossier, "dessins"), videos=(dessins == "video"), say=say)
+        except Exception as ex:
+            say(f"Dessins de façade non produits : {ex}")
     with open(os.path.join(dossier, "diagnostic.json"), "w", encoding="utf-8") as fh:
         json.dump(diag, fh, ensure_ascii=False, indent=1)
     return ann, diag
