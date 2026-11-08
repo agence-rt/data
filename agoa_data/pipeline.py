@@ -35,12 +35,13 @@ def _dossier(adr, dossier_sortie, sous, nom=None):
     return d
 
 
-def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facade_seule=False, photos_dir=None, avec_photos=True, niveaux_visibles=None):
+def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facade_seule=False, photos_dir=None, avec_photos=True, niveaux_visibles=None, dessins=None):
     """Exécute toute la chaîne et écrit les livrables dans `dossier_sortie/<NOM>/`. Retourne un dict de résultats.
 
     `adresse` : texte libre ou `geo.Adresse` (déjà choisie dans les suggestions).
     `facade_seule` : ne produit que le dessin des façades sur rue (dossier `facade`), sans les livrables de volumétrie.
     `niveaux_visibles` : nombre de niveaux au-dessus du RDC visibles depuis la rue (hors attiques en retrait) ; None = estimé.
+    `dessins` : None, "png" ou "video" — dessins d'architecte de la façade (élévation, ombres, teintes, trame, annotations, calepinage, planche), sans ou avec vidéos.
     `photos_dir` : dossier de photos de façade (facultatif) ; `avec_photos` : élévation photographique (Panoramax + vos photos) et ouvertures.
     """
     say = progress or (lambda s: None)
@@ -148,11 +149,12 @@ def analyser(adresse, dossier_sortie, progress=None, cache=None, nom=None, facad
             try:                                   # etape 1 : assemblage des vues de rue (RDC + 2 etages)
                 if "h_rdc" not in f.r:             # niveaux non saisis : estimation depuis le nombre de niveaux BD TOPO
                     facades.definir_niveaux(f, max(int(f.r.get("niveaux_n", 7)) - 1, 1))
-                _, dm = vue_unique.traiter(f, os.path.join(dfac, f"assemblage_{i}"), say=dire, n_etages=2)
+                _, dm = vue_unique.traiter(f, os.path.join(dfac, f"assemblage_{i}"), say=dire, n_etages=2, dessins=dessins, adresse=adr.label)
                 dire(f"Vue redressée : {len(dm['travees_m'])} travées détectées ; planchers lus {dm['planchers_lus_m']} (attendus {dm['planchers_attendus_m']})")
                 if dm.get("avertissement"):
                     dire("⚠ " + dm["avertissement"])
-                asm = {"dossier": f"assemblage_{i}", "fichier": f"assemblage_{i}/3_travees_numerotees.jpg", "travees": len(dm["travees_m"])}
+                asm = {"dossier": f"assemblage_{i}", "fichier": f"assemblage_{i}/3_travees_numerotees.jpg", "travees": len(dm["travees_m"]),
+                       "facade_json": dm.get("facade_json"), "dessins": dm.get("dessins")}
             except Exception as ex:
                 dire(f"Assemblage Panoramax impossible : {ex}")
                 lignes.append(traceback.format_exc())

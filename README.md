@@ -49,6 +49,16 @@ Saisir une adresse (suggestions pendant la frappe), choisir le dossier **ENREGIS
      valider ; sans image Panoramax exploitable, seul le niveau 1 est produit (vos photos seules n'ont ni position ni échelle) ; les
      véhicules, arbres et masques à l'avant-plan ne sont pas retirés ; la hauteur de prise de vue est supposée à 2,3 m.
 
+   - **Dessins d'architecte** (v0.15, case à cocher « Dessins d'architecte de la façade », avec ou sans vidéos) : à partir du relevé de la
+     méthode « une vue », le logiciel écrit `facade.json` (longueur, niveaux, travées, baies, balcons, ce qui est supposé, ce qui n'est pas lu), puis
+     dessine en code, dans `assemblage_<n>\dessins` : `elevation` (au trait, épaisseurs hiérarchisées), `relief` (ombres portées calculées,
+     soleil à 45° en haut à gauche, saillies supposées écrites dans le dessin), `teintes` (quatre variantes : menuiseries, garde-corps, persiennes),
+     `trace` (axes de travées, niveaux, cotes, rapports hauteur / largeur de la baie type de chaque niveau, décroissance des hauteurs d'étage),
+     `annote` (vocabulaire du métier, matériaux « probables ») et `calepinage` (assises, joints décalés, harpes, claveaux). Chacun en `.png`
+     1080 × 1920 et `.mp4` (3 s, 30 i/s, H.264, 20 dernières images tenues) ; puis `planche.png` (1080 × 1920) et `planche.pdf` (vrai A3 portrait).
+     Les vidéos utilisent ffmpeg (fourni par `imageio-ffmpeg`). Pour redessiner sans retraiter la rue : `py -m agoa_data.dessins facade.json [dossier] [--sans-video]`.
+     Le RDC (boutiques) n'est pas relevé : il est représenté en aplat et signalé comme tel sur chaque dessin.
+
 ## Volumétrie : ce que fait l'application
 1. **Adresse** → point (API de géocodage de la Géoplateforme, base adresse nationale). La recherche est **interactive** : des suggestions
    (Paris d'abord) s'affichent pendant la frappe ; ↑ ↓ + Entrée ou clic pour choisir, Échap pour fermer.
