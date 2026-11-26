@@ -15,6 +15,7 @@ import numpy as np
 from . import baies as baies_mod, dessins as dessins_mod, forme as forme_mod, mosaique, ouvertures as ov, panoramax, vues
 
 H_CAMERA = mosaique.H_CAMERA
+E_DALLE_SUPPOSEE = 0.90      # m : épaisseur de dalle + finition au-dessus d'un linteau, quand un seul linteau est lisible (R+1)
 
 
 def choisir(cands, f, d_min=4.0, d_max=16.0):
@@ -245,7 +246,7 @@ def hauteurs(zc, zs, h_haut, n=None, e_dalle=None):
     return r
 
 
-def analyser_elevation(img, mk, ech, longueur, h_niveau=None, h_haut=None, n=None):
+def analyser_elevation(img, mk, ech, longueur, h_niveau=None, h_haut=None, n=None, un_seul_linteau=False):
     """Corniche du RDC, travées numérotées, linteaux (référence des niveaux), hauteurs d'après la coupe, remise à plat."""
     zc = corniche(img, mk, ech)
     res = {"corniche_rdc_m": None if zc is None else round(zc, 2)}
@@ -253,6 +254,8 @@ def analyser_elevation(img, mk, ech, longueur, h_niveau=None, h_haut=None, n=Non
         return img, mk, res, [], [], {}
     segs = travees(img, mk, ech, zc, longueur)
     lint = linteaux(img, ech, zc, segs)
+    if un_seul_linteau:                                            # process « RDC + R+1 » : seul le premier linteau est mesuré
+        lint = lint[:1]
     if lint:                                                       # complète les travées manquées par corrélation avec le gabarit moyen
         n0 = len(segs)
         segs = completer_par_modele(img, ech, segs, longueur, zc + 0.6, lint[0][0] - 0.1)
@@ -261,6 +264,18 @@ def analyser_elevation(img, mk, ech, longueur, h_niveau=None, h_haut=None, n=Non
     res["linteaux_lus_m"] = [round(z, 2) for z, _, _ in lint]
     res["linteaux_nb_travees"] = [k for _, k, _ in lint]
     zs = [z for z, _, _ in lint]
+    res["niveaux_extrapoles"] = False
+    if len(zs) == 1 and h_haut and h_haut > zc + 2:
+        # une seule rangée de baies lisible (RDC + R+1 cadrés) : le nombre de niveaux est celui dont le premier linteau prévu
+        # (haut du RDC + pas − dalle) tombe le plus près du linteau lu ; les niveaux supérieurs sont extrapolés au même pas
+        choix = [int(n)] if n else range(2, 10)
+        nb = min(choix, key=lambda k: abs(zc + (h_haut - zc) / k - E_DALLE_SUPPOSEE - zs[0]))
+        pas0 = (h_haut - zc) / nb
+        res.update({"niveaux_extrapoles": True, "e_dalle_supposee_m": E_DALLE_SUPPOSEE,
+                    "ecart_linteau_vs_prevu_m": round(zc + pas0 - E_DALLE_SUPPOSEE - zs[0], 2),
+                    "linteaux_lus_m": [round(zs[0], 2)]})
+        zs = [zs[0] + k * pas0 for k in range(nb)]
+        n = nb
     hh = hauteurs(zc, zs, h_haut, n) if len(zs) >= 2 else {}
     if len(zs) >= 2:
         pas = hh["pas_lu"]
@@ -280,7 +295,8 @@ def analyser_elevation(img, mk, ech, longueur, h_niveau=None, h_haut=None, n=Non
                                     f"au-dessus du RDC ({zc:.2f} m) : écart {hh['ecart_sommet']:+.2f} m ; {n_alt} niveaux conviendraient. "
                                     f"Image non étirée ; vérifier le nombre de niveaux saisi.")
         kk = kap if appliquer else 1.0
-        anc = [(zc, kk * zc)] + [(a, kk * b) for a, b in zip(zs, reg)]
+        haut_img = img.shape[0] / ech - 0.3
+        anc = [(zc, kk * zc)] + [(a, kk * b) for a, b in zip(zs, reg) if a < haut_img and b * kk < haut_img]
         plat, mk2 = remettre_a_plat(img, mk, ech, anc, kappa=kk)
         # niveaux dans le repère final
         n_tot = hh.get("n", len(zs))

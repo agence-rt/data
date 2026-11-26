@@ -8,7 +8,7 @@ Via le **launcher AGOA** (le programme apparaît dans la liste une fois ajouté 
 ou en téléchargeant `AGOA-DATA-Setup-x.y.z.exe` dans la [dernière Release](https://github.com/agence-rt/data/releases/latest).
 L'application s'installe dans `C:\AGOA\data`.
 
-## Quatre fonctions, quatre boutons
+## Quatre fonctions, quatre boutons (le 4 est le process façade → DWG en 6 étapes)
 Saisir une adresse (suggestions pendant la frappe), choisir le dossier **ENREGISTRER SOUS**, puis :
 
 1. **CADASTRES (PDF A3)** — trois plans cadastraux A3 vectoriels (1/500, 1/1000, 1/2000), voir *Livrables*.
@@ -28,7 +28,26 @@ Saisir une adresse (suggestions pendant la frappe), choisir le dossier **ENREGIS
      qu'une partie du bâtiment, le recalage est signalé « peu fiable » et il faut vérifier l'aperçu ; plusieurs plans d'un même immeuble sont superposés
      sur le même emplacement, chacun dans ses calques.
 
-4. **FAÇADES SUR RUE** — dessin de chaque façade donnant sur une voie, dans `<NOM>\facade` : `facade_<n>_<VOIE>.png` (enveloppe),
+4. **FAÇADE → DWG (6 étapes)** (v0.16) — un seul process, une rue à la fois, dans `<NOM>\facade_dwg\<RUE>` (un fichier par étape, numéroté) :
+   1. **adresse** → `1_adresse.json` ;
+   2. **cadastre** : parcelle, bâtiments, rues ; si l'immeuble donne sur plusieurs rues, une fenêtre propose chaque façade avec sa **largeur** (BD TOPO ; front de
+      parcelle en comparaison) → `2_cadastre.png`, `2_facade.json` ;
+   3. **nuage de points** : **coupe perpendiculaire à la rue choisie** (sol réel, immeubles d'en face et voisins, hauteur de façade à l'alignement = terrasse
+      dessus de dalle ou égout, pente du toit, attiques en retrait) → `3_coupe.png`, `3_coupe.json` ;
+   4. **photos libres de rue** (Panoramax, CC-BY-SA, auteurs cités dans le cartouche) cadrant le RDC et R+1 : vue centrale redressée à l'échelle de la façade ; si elle ne
+      couvre pas toute la largeur, les vues voisines **comblent uniquement les colonnes manquantes** (recalage fin sur le recouvrement, pas de moyenne donc pas de
+      doublons) → `4_photo_redressee.jpg`, `4_photo.json` ;
+   5. **axes et trames de baies des étages courants** (le RDC est étudié à part : seul son haut est relevé) : axes de travées numérotés, largeurs (toutes égales à la
+      médiane, sauf la travée 1), niveaux, cases de baies plancher → linteau, rapports hauteur / largeur par niveau. Seuls le haut du RDC et le linteau de R+1
+      sont lus sur la photo ; le **nombre de niveaux** et le pas viennent de la hauteur de la coupe (choix du nombre dont le premier linteau prévu tombe sur le
+      linteau lu), les niveaux supérieurs sont extrapolés → `5_trame.png`, `5_trame.json` ;
+   6. **DXF / DWG** `6_<NOM>_<RUE>.dxf` (+ `.dwg` si l'ODA File Converter est installé) : **élévation** (x le long de la façade, y = altitude NGF) avec la photo
+      redressée en fond (`facade_redressee.jpg`, à garder à côté du DWG), calques `FAC_*` (contour, RDC, niveaux, axes, baies, cotes, textes) ; **coupe** à droite (même
+      altitude, calques `COUPE_*`) ; **plan** dessous (parcelle, bâtiments, rue, largeur de façade, calques `PLAN_*`) ; cartouche avec sources, photos utilisées et hypothèses.
+   Les hypothèses (épaisseur de dalle 0,90 m, allèges non relevées, largeurs régularisées…) sont écrites dans le cartouche, `resultats.json` et `journal.txt`.
+   L'ancien mode (dessins d'architecte PNG / vidéos, sans DWG) reste disponible en cochant la case « ancien mode » ; sa description suit.
+
+   *Ancien mode « façades sur rue »* — dessin de chaque façade donnant sur une voie, dans `<NOM>\facade` : `facade_<n>_<VOIE>.png` (enveloppe),
    `facades.dxf` (calques `F<n>_<VOIE>_SOL / FACADE / TOITURE / NIVEAUX / BAIES / BALCONS / COTES / TEXTES`, mètres, altitudes NGF).
    - *Niveau 1* : longueur (BD TOPO / cadastre), sol, égout, silhouette du toit (LiDAR HD), niveaux (BD TOPO ou 2,90 m estimés).
    - *Niveau 2 — forme générale* (avant tout détail). Le logiciel demande le **nombre de niveaux au-dessus du RDC visibles depuis la rue**

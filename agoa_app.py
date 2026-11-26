@@ -16,7 +16,7 @@ import tkinter as tk
 import traceback
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from agoa_data import APP_NAME, APP_VERSION, geo, pipeline     # APP_VERSION : à augmenter à chaque publication (cf. README)
+from agoa_data import APP_NAME, APP_VERSION, geo, pipeline, process     # APP_VERSION : à augmenter à chaque publication (cf. README)
 from agoa_data.geo import DataError
 
 # Charte graphique commune à la gamme AGOA
@@ -153,11 +153,11 @@ class App(tk.Tk):
         bph.grid(row=3, column=1)
         Button(bph, "CHOISIR…", self.choisir_photos).pack(side="left")
         Button(bph, "×", lambda: self._photos_vide()).pack(side="left", padx=(4, 0))
-        self.dessins = tk.BooleanVar(value=self.settings.get("dessins", True))
+        self.dessins = tk.BooleanVar(value=self.settings.get("dessins_ancien", False))
         self.videos = tk.BooleanVar(value=self.settings.get("dessins_videos", True))
         opts = tk.Frame(sortie, bg=BG)
         opts.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
-        for var, texte in ((self.dessins, "Dessins d'architecte de la façade (bouton 4)"), (self.videos, "avec vidéos")):
+        for var, texte in ((self.dessins, "Bouton 4 en ancien mode : dessins d'architecte (PNG / vidéos), sans DWG"), (self.videos, "avec vidéos")):
             tk.Checkbutton(opts, text=texte, variable=var, font=(FONT, 9), bg=BG, fg=INK, activebackground=BG, selectcolor=FIELD).pack(side="left", padx=(0, 14))
         sortie.columnconfigure(0, weight=1)
 
@@ -170,7 +170,7 @@ class App(tk.Tk):
             Button(barre, "1 · CADASTRES  (PDF A3)", lambda: self.lancer("cadastre"), primary=True),
             Button(barre, "2 · VOLUMÉTRIE  (nuage de points)", lambda: self.lancer("volumetrie"), primary=True),
             Button(barre, "3 · PLANS DWG  (depuis PDF)…", lambda: self.lancer("dwg"), primary=True),
-            Button(barre, "4 · FAÇADES SUR RUE", lambda: self.lancer("facade"), primary=True),
+            Button(barre, "4 · FAÇADE → DWG  (6 étapes)", lambda: self.lancer("facade"), primary=True),
         ]
         for b in self.actions:
             b.pack(side="left", padx=(0, 8))
@@ -362,12 +362,12 @@ class App(tk.Tk):
             if mode == "facade":
                 nv = simpledialog.askinteger(
                     APP_NAME, "Nombre de niveaux AU-DESSUS du RDC, visibles depuis la rue\n(sans les attiques en retrait non visibles de la rue).\n\n"
-                              "Laissez vide ou annulez pour une estimation d'après la hauteur.", parent=self, minvalue=1, maxvalue=25)
+                              "Laissez vide ou annulez : il est alors calculé d'après la coupe et la photo.", parent=self, minvalue=1, maxvalue=25)
                 self._niveaux = nv
         self._occupe(True)
         self.b_ouvrir.enable(False)
         self.b_pdf.enable(False)
-        self.settings.update(derniere_adresse=texte, dossier_sortie=self.out.get(), dessins=bool(self.dessins.get()), dessins_videos=bool(self.videos.get()))
+        self.settings.update(derniere_adresse=texte, dossier_sortie=self.out.get(), dessins_ancien=bool(self.dessins.get()), dessins_videos=bool(self.videos.get()))
         save_settings(self.settings)
         self.nb.select(self.t_suivi)
         self.log.config(state="normal")
@@ -386,6 +386,13 @@ class App(tk.Tk):
                 res = pipeline.cadastres(args[0], out, progress=say)
             elif mode == "dwg":
                 res = pipeline.plans_dwg(args[0], args[1], out, echelle=args[2], progress=say)
+            elif mode == "facade" and not self.dessins.get():
+                prep = process.preparer(args[0], say)
+                if len(prep["facades"]) > 1:
+                    self.q.put(("choix", prep))          # la rue est choisie dans la fenêtre, puis la suite repart
+                    return
+                res = process.facade_dwg(prep["adr"], out, voie=prep["facades"][0].voie, niveaux=getattr(self, "_niveaux", None), progress=say,
+                                         cache=os.path.join(out, "_cache"), prep=prep)
             elif mode == "facade":
                 res = pipeline.analyser(args[0], out, progress=say, cache=os.path.join(out, "_cache"), facade_seule=True,
                                         photos_dir=self.photos.get() or None, niveaux_visibles=getattr(self, "_niveaux", None),
@@ -397,6 +404,47 @@ class App(tk.Tk):
             self.q.put(("err", str(e)))
         except Exception as e:                           # noqa: BLE001 — on affiche tout à l'utilisateur
             self.q.put(("err", f"Erreur inattendue : {e}\n\n{traceback.format_exc()}"))
+
+    def _choisit_rue(self, prep):
+        """Un immeuble peut donner sur plusieurs rues : on choisit celle dont on veut la façade (largeur affichée)."""
+        fen = tk.Toplevel(self)
+        fen.title(APP_NAME)
+        fen.transient(self)
+        fen.configure(bg=BG)
+        tk.Label(fen, text="Sur quelle rue voulez-vous la façade ?", font=(FONT, 10, "bold"), bg=BG, fg=INK).pack(padx=16, pady=(14, 6))
+        lb = tk.Listbox(fen, font=(FONT, 10), height=len(prep["facades"]), width=64, activestyle="dotbox")
+        for f in prep["facades"]:
+            lb.insert("end", process.libelle_facade(f))
+        lb.selection_set(max(range(len(prep["facades"])), key=lambda i: prep["facades"][i].longueur))
+        lb.pack(padx=16, pady=4)
+        choix = {}
+
+        def ok(_=None):
+            sel = lb.curselection()
+            if sel:
+                choix["voie"] = prep["facades"][sel[0]].voie
+                fen.destroy()
+
+        lb.bind("<Double-Button-1>", ok)
+        Button(fen, "OK", ok, primary=True).pack(pady=(6, 14))
+        fen.grab_set()
+        self.wait_window(fen)
+        if "voie" not in choix:
+            self._ecrire("\nAnnulé.")
+            self._occupe(False)
+            return
+        out = self.out.get()
+
+        def suite():
+            say = lambda s: self.q.put(("log", s))
+            try:
+                self.q.put(("ok", process.facade_dwg(prep["adr"], out, voie=choix["voie"], niveaux=getattr(self, "_niveaux", None), progress=say,
+                                                    cache=os.path.join(out, "_cache"), prep=prep)))
+            except DataError as e:
+                self.q.put(("err", str(e)))
+            except Exception as e:                       # noqa: BLE001
+                self.q.put(("err", f"Erreur inattendue : {e}\n\n{traceback.format_exc()}"))
+        threading.Thread(target=suite, daemon=True).start()
 
     def _poll(self):
         try:
@@ -410,6 +458,8 @@ class App(tk.Tk):
                         self.log.config(state="disabled")
                     self._dl = val.startswith("Nuage de points")
                     self._ecrire(val)
+                elif kind == "choix":
+                    self._choisit_rue(val)
                 elif kind == "sugg":
                     self._montre_suggestions(*val)
                 elif kind == "ok":
@@ -441,6 +491,27 @@ class App(tk.Tk):
             for c in res["coupes"]:
                 t = "perpendiculaire à la" if c["type"] == "perpendiculaire" else "parallèle à la"
                 self.fichiers[f"Coupe {t} {c['voie']}"] = os.path.join(d, c["fichier"])
+        elif mode == "facade_dwg":
+            e2, e3, e5 = res["etapes"]["2_cadastre"], res["etapes"]["3_coupe"], res["etapes"].get("5_trame", {})
+            L = [f"Façade → DWG — {res['adresse']['label']} — {res['voie']}", "",
+                 "1 · Adresse : " + res["adresse"]["label"],
+                 f"2 · Cadastre : parcelle {e2['parcelle']}, façade de {e2['largeur_facade_m']:.2f} m" + (f" (front de parcelle {e2['front_parcelle_m']:.2f} m)" if e2.get("front_parcelle_m") else "")
+                 + ("  — autres rues : " + ", ".join(e2["autres_rues"]) if e2["autres_rues"] else ""),
+                 f"3 · Nuage de points : sol {e3['sol_ngf']:.2f} NGF, hauteur de façade {e3['hauteur_facade_m']:.2f} m ({e3['hauteur_facade_source']})"
+                 + (f", pente de toit {e3['pente_toit_deg']:.0f}°" if e3.get("pente_toit_deg") else "") + f", {e3['voisins_coupe']} immeuble(s) voisin(s) en coupe"]
+            ph = res["etapes"].get("4_photos") or {}
+            L.append("4 · Photos : " + (f"{len(ph['vues'])} vue(s) Panoramax, largeur couverte {100 * ph['couverture_largeur']:.0f} %" if ph.get("vues") else "aucune photo exploitable (" + str(ph.get("erreur", "")) + ")"))
+            if e5:
+                L.append(f"5 · Trame : {e5['n_travees']} travée(s), {e5['n_niveaux']} niveau(x) courants ; rapports h/l des baies : "
+                         + ", ".join(f"{r['niveau']} {r['rapport_h_l']:.1f}" for r in e5["rapports_h_l"]))
+            L.append("6 · " + (f"DWG : {res['dwg']}" if res.get("dwg") else f"DXF : {res['dxf']}   (DWG non produit : ODA File Converter absent)"))
+            if res.get("hypotheses"):
+                L += ["", "Hypothèses et limites :"] + ["   • " + h for h in res["hypotheses"]]
+            L += ["", f"Dossier : {d}"]
+            self.txt.insert("end", "\n".join(L))
+            for k, v in (("2 · Cadastre et largeur de façade", "2_cadastre.png"), ("3 · Coupe perpendiculaire à la rue", "3_coupe.png"), ("5 · Trame de la façade", "5_trame.png")):
+                if os.path.exists(os.path.join(d, v)):
+                    self.fichiers[k] = os.path.join(d, v)
         elif mode == "facade":
             L = [f"Façades sur rue — {res['adresse']['label']}", ""]
             for f in res["facades"]:
@@ -625,7 +696,7 @@ def _t_plans():
 
 
 def _t_modules():
-    from agoa_data import cadastre, coupes, dwg, export, facade_photos, facades, geo, httprange, lidar, ouvertures, panoramax, photos, pipeline, plans, rythme, volumetrie  # noqa: F401
+    from agoa_data import cadastre, coupes, dwg, export, facade_photos, facades, geo, httprange, lidar, livraison, ouvertures, panoramax, photos, pipeline, plans, process, rythme, volumetrie  # noqa: F401
 
 
 def main():
